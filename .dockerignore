@@ -1,0 +1,11 @@
+.git
+.gitignore
+.vscode
+.pnpm-store
+.env
+data.db
+**/__pycache__
+**/*.py[cod]
+**/node_modules
+src/frontend/dist
+*.log
