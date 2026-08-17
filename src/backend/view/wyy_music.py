@@ -1,7 +1,13 @@
 from fastapi import APIRouter
 
 from src.backend.controller import WyyMusicController
-from src.backend.schemas import ResponseSchemas, WyyMusicAnalysisRequest, WyyMusicLyricRequest, WyyMusicSearchRequest
+from src.backend.schemas import (
+    ResponseSchemas,
+    WyyMusicAnalysisRequest,
+    WyyMusicLyricRequest,
+    WyyMusicPlaylistRequest,
+    WyyMusicSearchRequest,
+)
 
 wyy_music_router = APIRouter(prefix="/api/v1/wyy_music", tags=["网易云音乐"])
 
@@ -17,6 +23,11 @@ def music_search(request: WyyMusicSearchRequest) -> ResponseSchemas:
         ResponseSchemas: 响应数据
     """
     return WyyMusicController.search_music(request)
+
+
+@wyy_music_router.post("/music_playlist", summary="获取网易云歌单")
+def music_playlist(request: WyyMusicPlaylistRequest) -> ResponseSchemas:
+    return WyyMusicController.music_playlist(request)
 
 
 @wyy_music_router.post("/music_analysis", summary="网易云音乐信息解析")

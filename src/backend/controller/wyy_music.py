@@ -9,11 +9,13 @@ from src.backend.schemas import (
     SongSchemas,
     WyyMusicAnalysisRequest,
     WyyMusicAnalysisResponse,
+    WyyMusicPlaylistRequest,
+    WyyMusicPlaylistResponse,
     WyyMusicSearchRequest,
     WyyMusicSearchResponse,
 )
 
-from .song import SongCacheController
+from .song import PlaylistCacheController, SongCacheController
 
 load_dotenv()
 
@@ -60,6 +62,46 @@ class WyyMusicController:
                 msg=response.json().get("msg", "error"),
                 data=None,
             )
+
+    @staticmethod
+    def music_playlist(request: WyyMusicPlaylistRequest) -> ResponseSchemas:
+        """获取网易云歌单详情。"""
+        cached = PlaylistCacheController.get_playlist_cache("wyy", request.id)
+        if cached.code == 200:
+            return cached
+
+        if not _URL or not (request.apikey or _API):
+            return ResponseSchemas(code=500, msg="音乐接口配置不完整", data=None)
+
+        try:
+            response = requests.get(
+                f"{_URL}/163_playlist",
+                params={"id": request.id, "apikey": request.apikey or _API},
+                timeout=20,
+            )
+            payload = response.json()
+        except requests.RequestException:
+            stale = PlaylistCacheController.get_playlist_cache("wyy", request.id, max_age=None)
+            return stale if stale.code == 200 else ResponseSchemas(code=502, msg="歌单服务暂时不可用", data=None)
+        except ValueError:
+            stale = PlaylistCacheController.get_playlist_cache("wyy", request.id, max_age=None)
+            return stale if stale.code == 200 else ResponseSchemas(code=502, msg="歌单服务返回了无效数据", data=None)
+
+        if response.status_code != 200 or payload.get("code") != 200:
+            return ResponseSchemas(
+                code=response.status_code if response.status_code != 200 else payload.get("code", 502),
+                msg=payload.get("msg", "获取歌单失败"),
+                data=None,
+            )
+
+        try:
+            playlist = WyyMusicPlaylistResponse.model_validate(payload["data"])
+        except (KeyError, TypeError, ValueError):
+            return ResponseSchemas(code=502, msg="歌单数据格式不正确", data=None)
+
+        playlist_data = playlist.model_dump()
+        PlaylistCacheController.save_playlist_cache("wyy", request.id, playlist_data)
+        return ResponseSchemas(code=200, msg="refreshed", data=[playlist_data])
 
     @staticmethod
     def music_analysis(request: WyyMusicAnalysisRequest) -> ResponseSchemas:

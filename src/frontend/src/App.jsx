@@ -3,6 +3,7 @@ import {
   CaretLeft,
   CaretRight,
   Compass,
+  Fire,
   GearSix,
   Heart,
   ListNumbers,
@@ -24,6 +25,7 @@ const API = "/api/v1/wyy_music";
 const SONG_API = "/api/v1/song";
 const RECENT_KEY = "imusic_recent_searches";
 const PLAY_MODE_KEY = "imusic_play_mode";
+const HOT_PLAYLIST_ID = 3778678;
 const PAGE_SIZE = 15;
 const fallbackSongs = [
   { id: 1859245776, name: "夜曲", artists: "周杰伦", album: "十一月的萧邦", picUrl: "" },
@@ -80,8 +82,14 @@ export function App() {
   const [playMode, setPlayMode] = useState(() => localStorage.getItem(PLAY_MODE_KEY) === "shuffle" ? "shuffle" : "sequence");
   const [favorites, setFavorites] = useState(new Set());
   const [favoriteLoading, setFavoriteLoading] = useState(null);
+  const [playlistName, setPlaylistName] = useState("热歌榜");
+  const [playlistTracks, setPlaylistTracks] = useState([]);
+  const [playlistPage, setPlaylistPage] = useState(1);
 
-  const resultLabel = useMemo(() => searchedKeyword ? `“${searchedKeyword}”的搜索结果` : "推荐歌曲", [searchedKeyword]);
+  const resultLabel = useMemo(() => {
+    if (searchedKeyword) return `“${searchedKeyword}”的搜索结果`;
+    return view === "hotlist" ? playlistName : "推荐歌曲";
+  }, [playlistName, searchedKeyword, view]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -144,6 +152,64 @@ export function App() {
     url: item.song_url,
     cached: true,
   });
+
+  const mapPlaylistTrack = (item) => ({
+    id: item.id,
+    name: item.name,
+    artists: (item.ar || []).map((artist) => artist.name).filter(Boolean).join(" / ") || "未知歌手",
+    album: item.al?.name || "未知专辑",
+    picUrl: item.al?.picUrl || "",
+  });
+
+  const showPlaylistPage = (tracks, targetPage) => {
+    const lastPage = Math.max(1, Math.ceil(tracks.length / PAGE_SIZE));
+    const safePage = Math.min(Math.max(targetPage, 1), lastPage);
+    const start = (safePage - 1) * PAGE_SIZE;
+    setPlaylistPage(safePage);
+    setSongs(tracks.slice(start, start + PAGE_SIZE));
+  };
+
+  const loadHotPlaylist = async (targetPage = 1) => {
+    setView("hotlist");
+    setSearchedKeyword("");
+    setHasNextPage(false);
+    setLoading(true);
+    setError("");
+
+    if (playlistTracks.length) {
+      showPlaylistPage(playlistTracks, targetPage);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API}/music_playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: HOT_PLAYLIST_ID }),
+      });
+      const payload = await response.json();
+      const playlist = payload.data?.[0];
+      if (!response.ok || payload.code !== 200 || !Array.isArray(playlist?.tracks)) {
+        throw new Error(payload.msg || "获取热歌榜失败");
+      }
+      const tracks = playlist.tracks.map(mapPlaylistTrack);
+      setPlaylistName(playlist.name || "热歌榜");
+      setPlaylistTracks(tracks);
+      showPlaylistPage(tracks, targetPage);
+    } catch (reason) {
+      setSongs([]);
+      setError(reason.message || "获取热歌榜失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const goToPlaylistPage = (targetPage) => {
+    if (targetPage < 1 || targetPage > Math.ceil(playlistTracks.length / PAGE_SIZE) || loading) return;
+    showPlaylistPage(playlistTracks, targetPage);
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const loadRecommendations = async (targetView = "discover") => {
     setView(targetView);
@@ -388,23 +454,32 @@ export function App() {
     localStorage.setItem(PLAY_MODE_KEY, nextMode);
   };
 
+  const playQueueSong = (song) => {
+    if (view === "hotlist" && playlistTracks.length) {
+      const trackIndex = playlistTracks.findIndex((item) => item.id === song.id);
+      const targetPage = trackIndex >= 0 ? Math.floor(trackIndex / PAGE_SIZE) + 1 : playlistPage;
+      if (targetPage !== playlistPage) showPlaylistPage(playlistTracks, targetPage);
+    }
+    playSong(song);
+  };
+
   const stepSong = (delta) => {
-    if (!songs.length) return;
-    const foundIndex = songs.findIndex((song) => song.id === current?.id);
-    const index = foundIndex >= 0 ? foundIndex : 0;
+    const queue = view === "hotlist" && playlistTracks.length ? playlistTracks : songs;
+    if (!queue.length) return;
+    const foundIndex = queue.findIndex((song) => song.id === current?.id);
 
     if (playMode === "shuffle") {
-      if (songs.length === 1) {
-        playSong(songs[0]);
+      if (queue.length === 1) {
+        playQueueSong(queue[0]);
         return;
       }
-      let randomIndex = index;
-      while (randomIndex === index) randomIndex = Math.floor(Math.random() * songs.length);
-      playSong(songs[randomIndex]);
+      let randomIndex = foundIndex;
+      while (randomIndex === foundIndex) randomIndex = Math.floor(Math.random() * queue.length);
+      playQueueSong(queue[randomIndex]);
       return;
     }
 
-    const nextIndex = index + delta;
+    const nextIndex = foundIndex >= 0 ? foundIndex + delta : delta >= 0 ? 0 : queue.length - 1;
     if (nextIndex < 0) {
       if (audioRef.current) audioRef.current.currentTime = 0;
       return;
@@ -414,7 +489,7 @@ export function App() {
       setPlaying(false);
       return;
     }
-    playSong(songs[nextIndex]);
+    playQueueSong(queue[nextIndex]);
   };
 
   return (
@@ -423,6 +498,7 @@ export function App() {
         <div className="wordmark">iMusic</div>
         <nav aria-label="音乐来源">
           <button className={`nav-item ${view === "discover" ? "active" : ""}`} onClick={() => loadRecommendations("discover")}><Compass size={24} weight="regular" /><span>发现</span></button>
+          <button className={`nav-item ${view === "hotlist" ? "active" : ""}`} onClick={() => loadHotPlaylist(1)}><Fire size={24} weight={view === "hotlist" ? "fill" : "regular"} /><span>热歌榜</span></button>
           <button className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => loadFavorites({ showList: true, targetPage: 1 })}><Heart size={24} weight={view === "favorites" ? "fill" : "regular"} /><span>我喜欢</span></button>
           <button className={`nav-item source-link ${view === "netease" ? "active" : ""}`} onClick={() => loadRecommendations("netease")}><span className="source-icon"><MusicNoteSimple size={17} weight="fill" /></span><span>网易云音乐</span></button>
           <button className="nav-item disabled" disabled><span className="source-icon ghost"><MusicNoteSimple size={17} weight="fill" /></span><span>QQ音乐 · 开发中</span></button>
@@ -448,10 +524,10 @@ export function App() {
         </section>
 
         <section className="results" aria-live="polite" ref={resultsRef}>
-          <div className="results-title"><h2>{view === "favorites" ? "我喜欢的音乐" : resultLabel}</h2>{loading && <span>{searchedKeyword ? "正在搜索…" : "正在加载推荐…"}</span>}</div>
+          <div className="results-title"><h2>{view === "favorites" ? "我喜欢的音乐" : resultLabel}</h2>{loading && <span>{searchedKeyword ? "正在搜索…" : view === "hotlist" ? "正在加载热歌榜…" : "正在加载推荐…"}</span>}</div>
           <div className="table-head"><span>歌曲</span><span>歌手</span><span>专辑</span><span /></div>
-          {error && <div className="message error"><span>{error}</span><button onClick={() => loadPage(searchedKeyword || query, page)}>重试</button></div>}
-          {!loading && !error && songs.length === 0 && <div className="message"><MusicNoteSimple size={30} /><strong>{view === "favorites" ? "还没有喜欢的歌曲" : searchedKeyword ? "没有找到相关歌曲" : "还没有可推荐的缓存歌曲"}</strong><span>{searchedKeyword ? "试试歌手名或更短的关键词" : "播放或收藏歌曲后，这里会出现推荐"}</span></div>}
+          {error && <div className="message error"><span>{error}</span><button onClick={() => view === "hotlist" ? loadHotPlaylist(playlistPage) : view === "favorites" ? loadFavorites({ showList: true, targetPage: favoritePage }) : searchedKeyword ? loadPage(searchedKeyword || query, page) : loadRecommendations(view)}>重试</button></div>}
+          {!loading && !error && songs.length === 0 && <div className="message"><MusicNoteSimple size={30} /><strong>{view === "favorites" ? "还没有喜欢的歌曲" : searchedKeyword ? "没有找到相关歌曲" : view === "hotlist" ? "热歌榜暂时没有歌曲" : "还没有可推荐的缓存歌曲"}</strong><span>{searchedKeyword ? "试试歌手名或更短的关键词" : view === "hotlist" ? "稍后重试加载热歌榜" : "播放或收藏歌曲后，这里会出现推荐"}</span></div>}
           <div className={`song-list ${loading ? "loading-list" : ""}`}>
             {songs.map((song) => {
               const selected = current?.id === song.id;
@@ -480,6 +556,19 @@ export function App() {
               </button>
               <span>第 {page} 页</span>
               <button onClick={() => goToPage(page + 1)} disabled={!hasNextPage || loading}>
+                下一页
+                <CaretRight size={17} weight="bold" />
+              </button>
+            </nav>
+          )}
+          {view === "hotlist" && !error && songs.length > 0 && (
+            <nav className="pagination" aria-label="热歌榜分页">
+              <button onClick={() => goToPlaylistPage(playlistPage - 1)} disabled={playlistPage === 1 || loading}>
+                <CaretLeft size={17} weight="bold" />
+                上一页
+              </button>
+              <span>第 {playlistPage} / {Math.ceil(playlistTracks.length / PAGE_SIZE)} 页</span>
+              <button onClick={() => goToPlaylistPage(playlistPage + 1)} disabled={playlistPage * PAGE_SIZE >= playlistTracks.length || loading}>
                 下一页
                 <CaretRight size={17} weight="bold" />
               </button>

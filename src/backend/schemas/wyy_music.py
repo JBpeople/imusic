@@ -50,3 +50,32 @@ class WyyMusicLyricResponse(BaseModel):
     tlyric: str | None = Field(default=None, description="翻译歌词内容")
     romalrc: str | None = Field(default=None, description="罗马拼音歌词内容")
     klyric: str | None = Field(default=None, description="卡拉OK歌词内容")
+
+
+class WyyMusicPlaylistRequest(BaseModel):
+    id: int = Field(..., description="网易云歌单ID (例如: 3778678)")
+    apikey: str | None = Field(default=None, description="登录用户的个人 API 密钥")
+
+
+class WyyMusicPlaylistArtist(BaseModel):
+    name: str = Field(..., description="歌手名称")
+
+
+class WyyMusicPlaylistAlbum(BaseModel):
+    name: str = Field(..., description="专辑名称")
+    picUrl: str | None = Field(default=None, description="专辑封面地址")
+
+
+class WyyMusicPlaylistTrack(BaseModel):
+    id: int = Field(..., description="歌曲ID")
+    name: str = Field(..., description="歌曲名称")
+    ar: list[WyyMusicPlaylistArtist] = Field(default_factory=list, description="歌手列表")
+    al: WyyMusicPlaylistAlbum = Field(..., description="专辑信息")
+
+
+class WyyMusicPlaylistResponse(BaseModel):
+    id: int = Field(..., description="网易云歌单ID (例如: 3778678)")
+    name: str = Field(..., description="歌单名称")
+    coverImgUrl: str | None = Field(default=None, description="歌单封面地址")
+    trackCount: int = Field(default=0, description="歌曲数量")
+    tracks: list[WyyMusicPlaylistTrack] = Field(default_factory=list, description="歌曲列表")

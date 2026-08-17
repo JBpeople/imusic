@@ -2,7 +2,7 @@ import contextlib
 import datetime
 import os
 
-from sqlalchemy import Column, DateTime, Integer, String, create_engine
+from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from dotenv import load_dotenv
 
@@ -78,6 +78,21 @@ class SongCache(Base, BaseMixin):
             "song_url": self.song_url,
             "last_played_at": self.last_played_at,
         }
+
+
+class PlaylistCache(Base, BaseMixin):
+    """歌单详情缓存数据模型。"""
+
+    __tablename__ = "playlist_cache"
+    platform = Column(String(8), nullable=False, comment="歌单平台")
+    playlist_id = Column(Integer, nullable=False, comment="歌单ID")
+    playlist_data = Column(Text, nullable=False, comment="歌单JSON数据")
+    refreshed_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.datetime.now(datetime.timezone.utc),
+        comment="最后刷新时间",
+    )
 
 
 Base.metadata.create_all(engine)

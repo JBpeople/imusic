@@ -5,6 +5,8 @@ from .wyy_music import (
     WyyMusicAnalysisResponse,
     WyyMusicLyricRequest,
     WyyMusicLyricResponse,
+    WyyMusicPlaylistRequest,
+    WyyMusicPlaylistResponse,
     WyyMusicSearchRequest,
     WyyMusicSearchResponse,
 )
@@ -18,6 +20,8 @@ __all__ = [
     "WyyMusicAnalysisResponse",
     "WyyMusicLyricRequest",
     "WyyMusicLyricResponse",
+    "WyyMusicPlaylistRequest",
+    "WyyMusicPlaylistResponse",
     "WyyMusicSearchRequest",
     "WyyMusicSearchResponse",
 ]
