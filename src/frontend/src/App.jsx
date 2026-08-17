@@ -67,6 +67,8 @@ export function App() {
   const audioRef = useRef(null);
   const resultsRef = useRef(null);
   const refreshingAudioRef = useRef(false);
+  const playbackQueueRef = useRef([]);
+  const playbackSourceRef = useRef(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState("discover");
   const [searchedKeyword, setSearchedKeyword] = useState("");
@@ -355,8 +357,13 @@ export function App() {
     }
   };
 
-  const playSong = async (song) => {
+  const playSong = async (song, { preserveQueue = false } = {}) => {
     const audio = audioRef.current;
+    if (!preserveQueue) {
+      const sourceQueue = PLAYLISTS[view] && playlistTracks.length ? playlistTracks : songs;
+      playbackQueueRef.current = [...sourceQueue];
+      playbackSourceRef.current = view;
+    }
     if (current?.id === song.id && audio?.src) {
       if (audio.paused) await audio.play(); else audio.pause();
       return;
@@ -470,16 +477,17 @@ export function App() {
   };
 
   const playQueueSong = (song) => {
-    if (PLAYLISTS[view] && playlistTracks.length) {
+    if (playbackSourceRef.current === view && PLAYLISTS[view] && playlistTracks.length) {
       const trackIndex = playlistTracks.findIndex((item) => item.id === song.id);
       const targetPage = trackIndex >= 0 ? Math.floor(trackIndex / PAGE_SIZE) + 1 : playlistPage;
       if (targetPage !== playlistPage) showPlaylistPage(playlistTracks, targetPage);
     }
-    playSong(song);
+    playSong(song, { preserveQueue: true });
   };
 
   const stepSong = (delta) => {
-    const queue = PLAYLISTS[view] && playlistTracks.length ? playlistTracks : songs;
+    const fallbackQueue = PLAYLISTS[view] && playlistTracks.length ? playlistTracks : songs;
+    const queue = playbackQueueRef.current.length ? playbackQueueRef.current : fallbackQueue;
     if (!queue.length) return;
     const foundIndex = queue.findIndex((song) => song.id === current?.id);
 
