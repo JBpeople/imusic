@@ -1,4 +1,4 @@
-from .common import ResponseSchemas, SongCacheSchemas, SongSchemas
+from .common import PlaylistSchemas, ResponseSchemas, SongCacheSchemas, SongSchemas
 from .qq_music import QqMusicSearchRequest
 from .wyy_music import (
     WyyMusicAnalysisRequest,
@@ -13,6 +13,7 @@ from .wyy_music import (
 
 __all__ = [
     "QqMusicSearchRequest",
+    "PlaylistSchemas",
     "ResponseSchemas",
     "SongCacheSchemas",
     "SongSchemas",

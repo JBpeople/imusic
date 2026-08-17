@@ -1,9 +1,24 @@
 from fastapi import APIRouter
 
-from src.backend.controller import FavoriteSongController, SongCacheController
-from src.backend.schemas import ResponseSchemas, SongCacheSchemas, SongSchemas
+from src.backend.controller import FavoritePlaylistController, FavoriteSongController, SongCacheController
+from src.backend.schemas import PlaylistSchemas, ResponseSchemas, SongCacheSchemas, SongSchemas
 
 song_router = APIRouter(prefix="/api/v1/song", tags=["音乐管理"])
+
+
+@song_router.post("/favorite_playlist", summary="添加收藏歌单")
+def add_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
+    return FavoritePlaylistController.add_favorite_playlist(request)
+
+
+@song_router.get("/favorite_playlists", summary="获取收藏歌单列表")
+def get_favorite_playlists(platform: str = "wyy") -> ResponseSchemas:
+    return FavoritePlaylistController.get_favorite_playlists(platform=platform)
+
+
+@song_router.delete("/favorite_playlist", summary="删除收藏歌单")
+def remove_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
+    return FavoritePlaylistController.remove_favorite_playlist(request)
 
 
 @song_router.post("/favorite_song", summary="添加喜欢歌曲")

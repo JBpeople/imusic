@@ -15,6 +15,11 @@ class SongSchemas(BaseModel):
     song_id: int = Field(..., description="歌曲ID")
 
 
+class PlaylistSchemas(BaseModel):
+    platform: str = Field(default="wyy", description="歌单平台")
+    playlist_id: int = Field(..., gt=0, description="歌单ID")
+
+
 class SongCacheSchemas(BaseModel):
     platform: str = Field(..., description="歌曲平台")
     song_id: int = Field(..., description="歌曲ID")

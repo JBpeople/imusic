@@ -2,7 +2,7 @@ import contextlib
 import datetime
 import os
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from dotenv import load_dotenv
 
@@ -47,6 +47,14 @@ class FavoriteSong(Base, BaseMixin):
     __tablename__ = "favorite_songs"
     platform = Column(String(4), nullable=False, comment="歌曲平台")
     song_id = Column(Integer, nullable=False, comment="歌曲ID")
+
+
+class FavoritePlaylist(Base, BaseMixin):
+    """收藏歌单数据模型。"""
+
+    __tablename__ = "favorite_playlists"
+    platform = Column(String(8), nullable=False, comment="歌单平台")
+    playlist_id = Column(BigInteger, nullable=False, comment="歌单ID")
 
 
 class SongCache(Base, BaseMixin):

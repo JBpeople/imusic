@@ -3,8 +3,93 @@ import json
 
 from sqlalchemy import func
 
-from src.backend.model import FavoriteSong, PlaylistCache, SongCache, get_session
-from src.backend.schemas import ResponseSchemas, SongCacheSchemas, SongSchemas
+from src.backend.model import FavoritePlaylist, FavoriteSong, PlaylistCache, SongCache, get_session
+from src.backend.schemas import PlaylistSchemas, ResponseSchemas, SongCacheSchemas, SongSchemas
+
+
+class FavoritePlaylistController:
+    @staticmethod
+    def add_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
+        """收藏歌单；已删除的记录会被恢复。"""
+        with get_session() as session:
+            favorite = (
+                session.query(FavoritePlaylist)
+                .filter(
+                    FavoritePlaylist.platform == request.platform,
+                    FavoritePlaylist.playlist_id == request.playlist_id,
+                )
+                .first()
+            )
+            if favorite:
+                favorite.deleted_at = None
+                favorite.updated_at = datetime.datetime.now(datetime.timezone.utc)
+                message = "restored"
+            else:
+                favorite = FavoritePlaylist(platform=request.platform, playlist_id=request.playlist_id)
+                session.add(favorite)
+                message = "created"
+            session.commit()
+            return ResponseSchemas(
+                code=200,
+                msg=message,
+                data=[{"platform": favorite.platform, "playlist_id": favorite.playlist_id}],
+            )
+
+    @staticmethod
+    def get_favorite_playlists(platform: str = "wyy") -> ResponseSchemas:
+        """获取收藏歌单，并附带已有缓存中的卡片信息。"""
+        with get_session() as session:
+            favorites = (
+                session.query(FavoritePlaylist)
+                .filter(FavoritePlaylist.platform == platform, FavoritePlaylist.deleted_at.is_(None))
+                .order_by(FavoritePlaylist.updated_at.desc())
+                .all()
+            )
+            data = []
+            for favorite in favorites:
+                item = {"platform": favorite.platform, "playlist_id": favorite.playlist_id}
+                cache = (
+                    session.query(PlaylistCache)
+                    .filter(
+                        PlaylistCache.platform == favorite.platform,
+                        PlaylistCache.playlist_id == favorite.playlist_id,
+                        PlaylistCache.deleted_at.is_(None),
+                    )
+                    .first()
+                )
+                if cache:
+                    try:
+                        playlist = json.loads(cache.playlist_data)
+                    except (TypeError, json.JSONDecodeError):
+                        playlist = {}
+                    item.update(
+                        {
+                            "name": playlist.get("name"),
+                            "coverImgUrl": playlist.get("coverImgUrl"),
+                            "trackCount": playlist.get("trackCount", 0),
+                        }
+                    )
+                data.append(item)
+            return ResponseSchemas(code=200, msg="success", data=data)
+
+    @staticmethod
+    def remove_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
+        """从我的歌单中移除歌单，保留歌单详情缓存。"""
+        with get_session() as session:
+            favorite = (
+                session.query(FavoritePlaylist)
+                .filter(
+                    FavoritePlaylist.platform == request.platform,
+                    FavoritePlaylist.playlist_id == request.playlist_id,
+                    FavoritePlaylist.deleted_at.is_(None),
+                )
+                .first()
+            )
+            if not favorite:
+                return ResponseSchemas(code=404, msg="playlist not found", data=None)
+            favorite.deleted_at = datetime.datetime.now(datetime.timezone.utc)
+            session.commit()
+            return ResponseSchemas(code=200, msg="deleted", data=None)
 
 
 class FavoriteSongController:

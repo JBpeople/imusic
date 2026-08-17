@@ -37,3 +37,7 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Local design verification artifacts
+design-qa.md
+design-qa-*.png

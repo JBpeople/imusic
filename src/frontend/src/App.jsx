@@ -3,7 +3,6 @@ import {
   CaretLeft,
   CaretRight,
   Compass,
-  Fire,
   GearSix,
   Heart,
   ListNumbers,
@@ -11,6 +10,7 @@ import {
   MusicNoteSimple,
   Pause,
   Play,
+  Plus,
   Queue,
   SpeakerHigh,
   SpeakerSlash,
@@ -18,8 +18,8 @@ import {
   SkipBack,
   SkipForward,
   Shuffle,
-  Sparkle,
-  TrendUp,
+  Trophy,
+  Trash,
   X,
 } from "@phosphor-icons/react";
 
@@ -32,7 +32,20 @@ const PLAYLISTS = {
   soaring: { id: 19723756, name: "飙升榜" },
   newchart: { id: 3779629, name: "新歌榜" },
 };
+const PLAYLIST_COLLECTIONS = {
+  rankings: {
+    title: "排行榜",
+    description: "查看网易云音乐的热门、新歌与飙升趋势",
+    keys: ["hotlist", "soaring", "newchart"],
+  },
+  playlists: {
+    title: "我的歌单",
+    description: "收藏的歌单都在这里，点开后查看全部歌曲",
+    keys: [],
+  },
+};
 const PAGE_SIZE = 15;
+const savedPlaylistKey = (id) => `saved-${id}`;
 const fallbackSongs = [
   { id: 1859245776, name: "夜曲", artists: "周杰伦", album: "十一月的萧邦", picUrl: "" },
   { id: 1858099441, name: "晴天", artists: "周杰伦", album: "叶惠美", picUrl: "" },
@@ -94,11 +107,31 @@ export function App() {
   const [playlistTracks, setPlaylistTracks] = useState([]);
   const [playlistPage, setPlaylistPage] = useState(1);
   const [playlistStore, setPlaylistStore] = useState({});
+  const [playlistCollectionError, setPlaylistCollectionError] = useState("");
+  const [playlistOrigin, setPlaylistOrigin] = useState("rankings");
+  const [savedPlaylists, setSavedPlaylists] = useState([]);
+  const [playlistIdInput, setPlaylistIdInput] = useState("");
+  const [playlistMutationLoading, setPlaylistMutationLoading] = useState(false);
+  const [deletingPlaylistId, setDeletingPlaylistId] = useState(null);
+
+  const playlistConfigs = useMemo(() => ({
+    ...PLAYLISTS,
+    ...Object.fromEntries(savedPlaylists.map((item) => [
+      savedPlaylistKey(item.playlist_id),
+      { id: item.playlist_id, name: item.name || `歌单 ${item.playlist_id}` },
+    ])),
+  }), [savedPlaylists]);
+
+  const getCollectionKeys = (collectionView, items = savedPlaylists) => (
+    collectionView === "playlists"
+      ? items.map((item) => savedPlaylistKey(item.playlist_id))
+      : PLAYLIST_COLLECTIONS[collectionView]?.keys || []
+  );
 
   const resultLabel = useMemo(() => {
     if (searchedKeyword) return `“${searchedKeyword}”的搜索结果`;
-    return PLAYLISTS[view] ? playlistName : "推荐歌曲";
-  }, [playlistName, searchedKeyword, view]);
+    return playlistConfigs[view] ? playlistName : "推荐歌曲";
+  }, [playlistConfigs, playlistName, searchedKeyword, view]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -178,10 +211,164 @@ export function App() {
     setSongs(tracks.slice(start, start + PAGE_SIZE));
   };
 
-  const loadPlaylist = async (playlistView, targetPage = 1) => {
-    const playlistConfig = PLAYLISTS[playlistView];
+  const fetchPlaylistById = async (playlistId, fallbackName = `歌单 ${playlistId}`) => {
+    const response = await fetch(`${API}/music_playlist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: playlistId }),
+    });
+    const payload = await response.json();
+    const playlist = payload.data?.[0];
+    if (!response.ok || payload.code !== 200 || !Array.isArray(playlist?.tracks)) {
+      throw new Error(payload.msg || `获取${fallbackName}失败`);
+    }
+    const tracks = playlist.tracks.map(mapPlaylistTrack);
+    return {
+      name: playlist.name || fallbackName,
+      coverImgUrl: playlist.coverImgUrl || "",
+      trackCount: playlist.trackCount || tracks.length,
+      tracks,
+    };
+  };
+
+  const fetchPlaylist = async (playlistView) => {
+    const playlistConfig = playlistConfigs[playlistView];
+    if (!playlistConfig) throw new Error("歌单不存在或已被移除");
+    return fetchPlaylistById(playlistConfig.id, playlistConfig.name);
+  };
+
+  const loadSavedPlaylists = async () => {
+    const response = await fetch(`${SONG_API}/favorite_playlists?platform=wyy`);
+    const payload = await response.json();
+    if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "获取收藏歌单失败");
+    const items = payload.data || [];
+    setSavedPlaylists(items);
+    setPlaylistStore((previous) => {
+      const next = { ...previous };
+      const currentKeys = new Set(items.map((item) => savedPlaylistKey(item.playlist_id)));
+      Object.keys(next).forEach((key) => {
+        if (key.startsWith("saved-") && !currentKeys.has(key)) delete next[key];
+      });
+      items.forEach((item) => {
+        const key = savedPlaylistKey(item.playlist_id);
+        next[key] = {
+          name: item.name || `歌单 ${item.playlist_id}`,
+          coverImgUrl: item.coverImgUrl || "",
+          trackCount: item.trackCount || 0,
+          tracks: Array.isArray(previous[key]?.tracks) ? previous[key].tracks : null,
+        };
+      });
+      return next;
+    });
+    return items;
+  };
+
+  const addSavedPlaylist = async (event) => {
+    event.preventDefault();
+    const value = playlistIdInput.trim();
+    const playlistId = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(playlistId) || playlistId <= 0) {
+      setPlaylistCollectionError("请输入正确的网易云歌单 ID");
+      return;
+    }
+
+    setPlaylistMutationLoading(true);
+    setPlaylistCollectionError("");
+    try {
+      const playlist = await fetchPlaylistById(playlistId);
+      const response = await fetch(`${SONG_API}/favorite_playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "wyy", playlist_id: playlistId }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "添加歌单失败");
+
+      const item = {
+        platform: "wyy",
+        playlist_id: playlistId,
+        name: playlist.name,
+        coverImgUrl: playlist.coverImgUrl,
+        trackCount: playlist.trackCount,
+      };
+      setSavedPlaylists((previous) => [item, ...previous.filter((entry) => entry.playlist_id !== playlistId)]);
+      setPlaylistStore((previous) => ({ ...previous, [savedPlaylistKey(playlistId)]: playlist }));
+      setPlaylistIdInput("");
+    } catch (reason) {
+      setPlaylistCollectionError(reason.message || "添加歌单失败");
+    } finally {
+      setPlaylistMutationLoading(false);
+    }
+  };
+
+  const removeSavedPlaylist = async (playlistId) => {
+    setDeletingPlaylistId(playlistId);
+    setPlaylistCollectionError("");
+    try {
+      const response = await fetch(`${SONG_API}/favorite_playlist`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "wyy", playlist_id: playlistId }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "删除歌单失败");
+      setSavedPlaylists((previous) => previous.filter((item) => item.playlist_id !== playlistId));
+      setPlaylistStore((previous) => {
+        const next = { ...previous };
+        delete next[savedPlaylistKey(playlistId)];
+        return next;
+      });
+    } catch (reason) {
+      setPlaylistCollectionError(reason.message || "删除歌单失败");
+    } finally {
+      setDeletingPlaylistId(null);
+    }
+  };
+
+  const loadPlaylistCollection = async (collectionView = "playlists") => {
+    const collection = PLAYLIST_COLLECTIONS[collectionView];
+    if (!collection) return;
+
+    setView(collectionView);
+    setSearchedKeyword("");
+    setHasNextPage(false);
+    setError("");
+    setPlaylistCollectionError("");
+
+    if (collectionView === "playlists") {
+      setLoading(true);
+      try {
+        await loadSavedPlaylists();
+      } catch (reason) {
+        setPlaylistCollectionError(reason.message || "获取收藏歌单失败");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    const missingKeys = getCollectionKeys(collectionView).filter((key) => !playlistStore[key]);
+    if (missingKeys.length === 0) return;
+
+    setLoading(true);
+    const results = await Promise.allSettled(missingKeys.map(async (key) => [key, await fetchPlaylist(key)]));
+    const loaded = Object.fromEntries(
+      results.filter((result) => result.status === "fulfilled").map((result) => result.value),
+    );
+    if (Object.keys(loaded).length) {
+      setPlaylistStore((previous) => ({ ...previous, ...loaded }));
+    }
+    if (results.some((result) => result.status === "rejected")) {
+      setPlaylistCollectionError("部分歌单暂时没有加载成功，可以点击卡片重试");
+    }
+    setLoading(false);
+  };
+
+  const loadPlaylist = async (playlistView, targetPage = 1, originView = playlistOrigin) => {
+    const playlistConfig = playlistConfigs[playlistView];
     if (!playlistConfig) return;
 
+    setPlaylistOrigin(originView);
     setView(playlistView);
     setSearchedKeyword("");
     setHasNextPage(false);
@@ -189,7 +376,7 @@ export function App() {
     setError("");
 
     const storedPlaylist = playlistStore[playlistView];
-    if (storedPlaylist) {
+    if (storedPlaylist && Array.isArray(storedPlaylist.tracks)) {
       setPlaylistName(storedPlaylist.name);
       setPlaylistTracks(storedPlaylist.tracks);
       showPlaylistPage(storedPlaylist.tracks, targetPage);
@@ -198,22 +385,11 @@ export function App() {
     }
 
     try {
-      const response = await fetch(`${API}/music_playlist`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: playlistConfig.id }),
-      });
-      const payload = await response.json();
-      const playlist = payload.data?.[0];
-      if (!response.ok || payload.code !== 200 || !Array.isArray(playlist?.tracks)) {
-        throw new Error(payload.msg || `获取${playlistConfig.name}失败`);
-      }
-      const tracks = playlist.tracks.map(mapPlaylistTrack);
-      const name = playlist.name || playlistConfig.name;
-      setPlaylistName(name);
-      setPlaylistTracks(tracks);
-      setPlaylistStore((previous) => ({ ...previous, [playlistView]: { name, tracks } }));
-      showPlaylistPage(tracks, targetPage);
+      const playlist = await fetchPlaylist(playlistView);
+      setPlaylistName(playlist.name);
+      setPlaylistTracks(playlist.tracks);
+      setPlaylistStore((previous) => ({ ...previous, [playlistView]: playlist }));
+      showPlaylistPage(playlist.tracks, targetPage);
     } catch (reason) {
       setSongs([]);
       setError(reason.message || `获取${playlistConfig.name}失败`);
@@ -249,6 +425,7 @@ export function App() {
 
   useEffect(() => {
     loadFavorites();
+    loadSavedPlaylists().catch(() => {});
     loadRecommendations("discover");
   }, []);
 
@@ -360,7 +537,7 @@ export function App() {
   const playSong = async (song, { preserveQueue = false } = {}) => {
     const audio = audioRef.current;
     if (!preserveQueue) {
-      const sourceQueue = PLAYLISTS[view] && playlistTracks.length ? playlistTracks : songs;
+      const sourceQueue = playlistConfigs[view] && playlistTracks.length ? playlistTracks : songs;
       playbackQueueRef.current = [...sourceQueue];
       playbackSourceRef.current = view;
     }
@@ -477,7 +654,7 @@ export function App() {
   };
 
   const playQueueSong = (song) => {
-    if (playbackSourceRef.current === view && PLAYLISTS[view] && playlistTracks.length) {
+    if (playbackSourceRef.current === view && playlistConfigs[view] && playlistTracks.length) {
       const trackIndex = playlistTracks.findIndex((item) => item.id === song.id);
       const targetPage = trackIndex >= 0 ? Math.floor(trackIndex / PAGE_SIZE) + 1 : playlistPage;
       if (targetPage !== playlistPage) showPlaylistPage(playlistTracks, targetPage);
@@ -486,7 +663,7 @@ export function App() {
   };
 
   const stepSong = (delta) => {
-    const fallbackQueue = PLAYLISTS[view] && playlistTracks.length ? playlistTracks : songs;
+    const fallbackQueue = playlistConfigs[view] && playlistTracks.length ? playlistTracks : songs;
     const queue = playbackQueueRef.current.length ? playbackQueueRef.current : fallbackQueue;
     if (!queue.length) return;
     const foundIndex = queue.findIndex((song) => song.id === current?.id);
@@ -507,7 +684,7 @@ export function App() {
       if (audioRef.current) audioRef.current.currentTime = 0;
       return;
     }
-    if (nextIndex >= songs.length) {
+    if (nextIndex >= queue.length) {
       audioRef.current?.pause();
       setPlaying(false);
       return;
@@ -520,11 +697,10 @@ export function App() {
       <aside className="sidebar">
         <div className="wordmark">iMusic</div>
         <nav aria-label="主导航">
-          <button className={`nav-item ${view === "discover" ? "active" : ""}`} onClick={() => loadRecommendations("discover")}><Compass size={24} weight="regular" /><span>发现</span></button>
-          <button className={`nav-item ${view === "hotlist" ? "active" : ""}`} onClick={() => loadPlaylist("hotlist", 1)}><Fire size={24} weight={view === "hotlist" ? "fill" : "regular"} /><span>热歌榜</span></button>
-          <button className={`nav-item ${view === "soaring" ? "active" : ""}`} onClick={() => loadPlaylist("soaring", 1)}><TrendUp size={24} weight={view === "soaring" ? "bold" : "regular"} /><span>飙升榜</span></button>
-          <button className={`nav-item ${view === "newchart" ? "active" : ""}`} onClick={() => loadPlaylist("newchart", 1)}><Sparkle size={24} weight={view === "newchart" ? "fill" : "regular"} /><span>新歌榜</span></button>
-          <button className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => loadFavorites({ showList: true, targetPage: 1 })}><Heart size={24} weight={view === "favorites" ? "fill" : "regular"} /><span>我喜欢</span></button>
+          <button className={`nav-item ${view === "discover" ? "active" : ""}`} onClick={() => loadRecommendations("discover")} aria-label="发现"><Compass size={24} weight="regular" /><span>发现</span></button>
+          <button className={`nav-item ${view === "rankings" || (playlistConfigs[view] && playlistOrigin === "rankings") ? "active" : ""}`} onClick={() => loadPlaylistCollection("rankings")} aria-label="排行榜"><Trophy size={24} weight={view === "rankings" || (playlistConfigs[view] && playlistOrigin === "rankings") ? "fill" : "regular"} /><span>排行榜</span></button>
+          <button className={`nav-item ${view === "playlists" || (playlistConfigs[view] && playlistOrigin === "playlists") ? "active" : ""}`} onClick={() => loadPlaylistCollection("playlists")} aria-label="我的歌单"><Queue size={24} weight={view === "playlists" || (playlistConfigs[view] && playlistOrigin === "playlists") ? "fill" : "regular"} /><span>我的歌单</span></button>
+          <button className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => loadFavorites({ showList: true, targetPage: 1 })} aria-label="我喜欢"><Heart size={24} weight={view === "favorites" ? "fill" : "regular"} /><span>我喜欢</span></button>
         </nav>
         <button className="settings"><GearSix size={23} /><span>设置</span></button>
       </aside>
@@ -547,68 +723,103 @@ export function App() {
         </section>
 
         <section className="results" aria-live="polite" ref={resultsRef}>
-          <div className="results-title"><h2>{view === "favorites" ? "我喜欢的音乐" : resultLabel}</h2>{loading && <span>{searchedKeyword ? "正在搜索…" : PLAYLISTS[view] ? `正在加载${PLAYLISTS[view].name}…` : "正在加载推荐…"}</span>}</div>
-          <div className="table-head"><span>歌曲</span><span>歌手</span><span>专辑</span><span /></div>
-          {error && <div className="message error"><span>{error}</span><button onClick={() => PLAYLISTS[view] ? loadPlaylist(view, playlistPage) : view === "favorites" ? loadFavorites({ showList: true, targetPage: favoritePage }) : searchedKeyword ? loadPage(searchedKeyword || query, page) : loadRecommendations(view)}>重试</button></div>}
-          {!loading && !error && songs.length === 0 && <div className="message"><MusicNoteSimple size={30} /><strong>{view === "favorites" ? "还没有喜欢的歌曲" : searchedKeyword ? "没有找到相关歌曲" : PLAYLISTS[view] ? `${PLAYLISTS[view].name}暂时没有歌曲` : "还没有可推荐的缓存歌曲"}</strong><span>{searchedKeyword ? "试试歌手名或更短的关键词" : PLAYLISTS[view] ? `稍后重试加载${PLAYLISTS[view].name}` : "播放或收藏歌曲后，这里会出现推荐"}</span></div>}
-          <div className={`song-list ${loading ? "loading-list" : ""}`}>
-            {songs.map((song) => {
-              const selected = current?.id === song.id;
-              const busy = resolvingId === song.id;
-              return (
-                <div className={`song-row ${selected ? "selected" : ""}`} key={song.id} role="button" tabIndex="0" onDoubleClick={() => playSong(song)} onClick={() => playSong(song)} onKeyDown={(event) => { if (event.key === "Enter") playSong(song); }}>
-                  <span className="song-cell">
-                    <span className="row-action">{busy ? <SpinnerGap className="spin" size={18} /> : selected && playing ? <span className="playing-bars"><i /><i /><i /></span> : <Play size={16} weight="fill" />}</span>
-                    <Artwork song={song} />
-                    <span className="song-name">{song.name}</span>
-                  </span>
-                  <span className="truncate">{song.artists}</span>
-                  <span className="truncate album">{song.album}</span>
-                  <button className={`favorite-button ${favorites.has(`wyy:${song.id}`) ? "liked" : ""}`} onClick={(event) => toggleFavorite(event, song)} aria-label={favorites.has(`wyy:${song.id}`) ? "取消喜欢" : "添加喜欢"} disabled={favoriteLoading === song.id}>
-                    {favoriteLoading === song.id ? <SpinnerGap className="spin" size={20} /> : <Heart size={21} weight={favorites.has(`wyy:${song.id}`) ? "fill" : "regular"} />}
-                  </button>
+          {PLAYLIST_COLLECTIONS[view] ? (
+            <>
+              <div className="playlist-library-heading">
+                <div><h2>{PLAYLIST_COLLECTIONS[view].title}</h2><p>{PLAYLIST_COLLECTIONS[view].description}</p></div>
+                {view === "playlists" ? (
+                  <form className="playlist-add-form" onSubmit={addSavedPlaylist}>
+                    <input value={playlistIdInput} onChange={(event) => setPlaylistIdInput(event.target.value)} inputMode="numeric" placeholder="输入网易云歌单 ID" aria-label="网易云歌单 ID" disabled={playlistMutationLoading} />
+                    <button type="submit" disabled={playlistMutationLoading || !playlistIdInput.trim()}>
+                      {playlistMutationLoading ? <SpinnerGap className="spin" size={17} /> : <Plus size={17} weight="bold" />}
+                      添加歌单
+                    </button>
+                  </form>
+                ) : loading && <span><SpinnerGap className="spin" size={16} />正在同步歌单…</span>}
+              </div>
+              {playlistCollectionError && <div className="playlist-notice">{playlistCollectionError}</div>}
+              {view === "playlists" && !loading && savedPlaylists.length === 0 && (
+                <div className="playlist-empty"><Queue size={30} weight="duotone" /><strong>还没有收藏歌单</strong><span>在上方输入网易云歌单 ID 添加</span></div>
+              )}
+              <div className={`playlist-grid ${loading ? "loading-playlists" : ""}`}>
+                {getCollectionKeys(view).map((key) => {
+                  const config = playlistConfigs[key];
+                  const playlist = playlistStore[key];
+                  const playlistId = config.id;
+                  return (
+                    <article className="playlist-card" key={key}>
+                      <button className="playlist-card-open" onClick={() => loadPlaylist(key, 1, view)}>
+                        <span className="playlist-cover-wrap">
+                          {playlist?.coverImgUrl ? <img src={playlist.coverImgUrl} alt={`${playlist.name}封面`} /> : <span className="playlist-cover-fallback"><Queue size={42} weight="duotone" /></span>}
+                          <span className="playlist-card-play"><Play size={19} weight="fill" /></span>
+                        </span>
+                        <strong>{playlist?.name || config.name}</strong>
+                        <span>{playlist ? `${playlist.trackCount} 首歌曲` : loading ? "正在读取歌单…" : "点击加载歌单"}</span>
+                      </button>
+                      {view === "playlists" && (
+                        <button className="playlist-delete" onClick={() => removeSavedPlaylist(playlistId)} aria-label={`删除${playlist?.name || config.name}`} title="从我的歌单中删除" disabled={deletingPlaylistId === playlistId}>
+                          {deletingPlaylistId === playlistId ? <SpinnerGap className="spin" size={17} /> : <Trash size={17} />}
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={`results-title ${playlistConfigs[view] ? "playlist-detail-title" : ""}`}>
+                <div>
+                  {playlistConfigs[view] && <button className="back-to-playlists" onClick={() => loadPlaylistCollection(playlistOrigin)}><CaretLeft size={16} weight="bold" />{PLAYLIST_COLLECTIONS[playlistOrigin].title}</button>}
+                  <h2>{view === "favorites" ? "我喜欢的音乐" : resultLabel}</h2>
                 </div>
-              );
-            })}
-          </div>
-          {view === "netease" && searchedKeyword && !error && songs.length > 0 && (
-            <nav className="pagination" aria-label="搜索结果分页">
-              <button onClick={() => goToPage(page - 1)} disabled={page === 1 || loading}>
-                <CaretLeft size={17} weight="bold" />
-                上一页
-              </button>
-              <span>第 {page} 页</span>
-              <button onClick={() => goToPage(page + 1)} disabled={!hasNextPage || loading}>
-                下一页
-                <CaretRight size={17} weight="bold" />
-              </button>
-            </nav>
-          )}
-          {PLAYLISTS[view] && !error && songs.length > 0 && (
-            <nav className="pagination" aria-label={`${PLAYLISTS[view].name}分页`}>
-              <button onClick={() => goToPlaylistPage(playlistPage - 1)} disabled={playlistPage === 1 || loading}>
-                <CaretLeft size={17} weight="bold" />
-                上一页
-              </button>
-              <span>第 {playlistPage} / {Math.ceil(playlistTracks.length / PAGE_SIZE)} 页</span>
-              <button onClick={() => goToPlaylistPage(playlistPage + 1)} disabled={playlistPage * PAGE_SIZE >= playlistTracks.length || loading}>
-                下一页
-                <CaretRight size={17} weight="bold" />
-              </button>
-            </nav>
-          )}
-          {view === "favorites" && !error && songs.length > 0 && (
-            <nav className="pagination" aria-label="喜欢音乐分页">
-              <button onClick={() => goToFavoritePage(favoritePage - 1)} disabled={favoritePage === 1 || loading}>
-                <CaretLeft size={17} weight="bold" />
-                上一页
-              </button>
-              <span>第 {favoritePage} 页</span>
-              <button onClick={() => goToFavoritePage(favoritePage + 1)} disabled={!favoriteHasNextPage || loading}>
-                下一页
-                <CaretRight size={17} weight="bold" />
-              </button>
-            </nav>
+                {loading && <span>{searchedKeyword ? "正在搜索…" : playlistConfigs[view] ? `正在加载${playlistConfigs[view].name}…` : "正在加载推荐…"}</span>}
+              </div>
+              <div className="table-head"><span>歌曲</span><span>歌手</span><span>专辑</span><span /></div>
+              {error && <div className="message error"><span>{error}</span><button onClick={() => playlistConfigs[view] ? loadPlaylist(view, playlistPage) : view === "favorites" ? loadFavorites({ showList: true, targetPage: favoritePage }) : searchedKeyword ? loadPage(searchedKeyword || query, page) : loadRecommendations(view)}>重试</button></div>}
+              {!loading && !error && songs.length === 0 && <div className="message"><MusicNoteSimple size={30} /><strong>{view === "favorites" ? "还没有喜欢的歌曲" : searchedKeyword ? "没有找到相关歌曲" : playlistConfigs[view] ? `${playlistConfigs[view].name}暂时没有歌曲` : "还没有可推荐的缓存歌曲"}</strong><span>{searchedKeyword ? "试试歌手名或更短的关键词" : playlistConfigs[view] ? `稍后重试加载${playlistConfigs[view].name}` : "播放或收藏歌曲后，这里会出现推荐"}</span></div>}
+              <div className={`song-list ${loading ? "loading-list" : ""}`}>
+                {songs.map((song) => {
+                  const selected = current?.id === song.id;
+                  const busy = resolvingId === song.id;
+                  return (
+                    <div className={`song-row ${selected ? "selected" : ""}`} key={song.id} role="button" tabIndex="0" onDoubleClick={() => playSong(song)} onClick={() => playSong(song)} onKeyDown={(event) => { if (event.key === "Enter") playSong(song); }}>
+                      <span className="song-cell">
+                        <span className="row-action">{busy ? <SpinnerGap className="spin" size={18} /> : selected && playing ? <span className="playing-bars"><i /><i /><i /></span> : <Play size={16} weight="fill" />}</span>
+                        <Artwork song={song} />
+                        <span className="song-name">{song.name}</span>
+                      </span>
+                      <span className="truncate">{song.artists}</span>
+                      <span className="truncate album">{song.album}</span>
+                      <button className={`favorite-button ${favorites.has(`wyy:${song.id}`) ? "liked" : ""}`} onClick={(event) => toggleFavorite(event, song)} aria-label={favorites.has(`wyy:${song.id}`) ? "取消喜欢" : "添加喜欢"} disabled={favoriteLoading === song.id}>
+                        {favoriteLoading === song.id ? <SpinnerGap className="spin" size={20} /> : <Heart size={21} weight={favorites.has(`wyy:${song.id}`) ? "fill" : "regular"} />}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              {view === "netease" && searchedKeyword && !error && songs.length > 0 && (
+                <nav className="pagination" aria-label="搜索结果分页">
+                  <button onClick={() => goToPage(page - 1)} disabled={page === 1 || loading}><CaretLeft size={17} weight="bold" />上一页</button>
+                  <span>第 {page} 页</span>
+                  <button onClick={() => goToPage(page + 1)} disabled={!hasNextPage || loading}>下一页<CaretRight size={17} weight="bold" /></button>
+                </nav>
+              )}
+              {playlistConfigs[view] && !error && songs.length > 0 && (
+                <nav className="pagination" aria-label={`${playlistConfigs[view].name}分页`}>
+                  <button onClick={() => goToPlaylistPage(playlistPage - 1)} disabled={playlistPage === 1 || loading}><CaretLeft size={17} weight="bold" />上一页</button>
+                  <span>第 {playlistPage} / {Math.ceil(playlistTracks.length / PAGE_SIZE)} 页</span>
+                  <button onClick={() => goToPlaylistPage(playlistPage + 1)} disabled={playlistPage * PAGE_SIZE >= playlistTracks.length || loading}>下一页<CaretRight size={17} weight="bold" /></button>
+                </nav>
+              )}
+              {view === "favorites" && !error && songs.length > 0 && (
+                <nav className="pagination" aria-label="喜欢音乐分页">
+                  <button onClick={() => goToFavoritePage(favoritePage - 1)} disabled={favoritePage === 1 || loading}><CaretLeft size={17} weight="bold" />上一页</button>
+                  <span>第 {favoritePage} 页</span>
+                  <button onClick={() => goToFavoritePage(favoritePage + 1)} disabled={!favoriteHasNextPage || loading}>下一页<CaretRight size={17} weight="bold" /></button>
+                </nav>
+              )}
+            </>
           )}
         </section>
       </main>

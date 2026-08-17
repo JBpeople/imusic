@@ -1,3 +1,3 @@
-from .song import FavoriteSong, PlaylistCache, SongCache, get_session
+from .song import FavoritePlaylist, FavoriteSong, PlaylistCache, SongCache, get_session
 
-__all__ = ["FavoriteSong", "PlaylistCache", "SongCache", "get_session"]
+__all__ = ["FavoritePlaylist", "FavoriteSong", "PlaylistCache", "SongCache", "get_session"]
