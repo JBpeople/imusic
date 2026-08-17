@@ -18,6 +18,7 @@ import {
   SkipBack,
   SkipForward,
   Shuffle,
+  Sparkle,
   TrendUp,
   X,
 } from "@phosphor-icons/react";
@@ -29,6 +30,7 @@ const PLAY_MODE_KEY = "imusic_play_mode";
 const PLAYLISTS = {
   hotlist: { id: 3778678, name: "热歌榜" },
   soaring: { id: 19723756, name: "飙升榜" },
+  newchart: { id: 3779629, name: "新歌榜" },
 };
 const PAGE_SIZE = 15;
 const fallbackSongs = [
@@ -513,6 +515,7 @@ export function App() {
           <button className={`nav-item ${view === "discover" ? "active" : ""}`} onClick={() => loadRecommendations("discover")}><Compass size={24} weight="regular" /><span>发现</span></button>
           <button className={`nav-item ${view === "hotlist" ? "active" : ""}`} onClick={() => loadPlaylist("hotlist", 1)}><Fire size={24} weight={view === "hotlist" ? "fill" : "regular"} /><span>热歌榜</span></button>
           <button className={`nav-item ${view === "soaring" ? "active" : ""}`} onClick={() => loadPlaylist("soaring", 1)}><TrendUp size={24} weight={view === "soaring" ? "bold" : "regular"} /><span>飙升榜</span></button>
+          <button className={`nav-item ${view === "newchart" ? "active" : ""}`} onClick={() => loadPlaylist("newchart", 1)}><Sparkle size={24} weight={view === "newchart" ? "fill" : "regular"} /><span>新歌榜</span></button>
           <button className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => loadFavorites({ showList: true, targetPage: 1 })}><Heart size={24} weight={view === "favorites" ? "fill" : "regular"} /><span>我喜欢</span></button>
         </nav>
         <button className="settings"><GearSix size={23} /><span>设置</span></button>
