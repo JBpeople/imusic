@@ -18,6 +18,7 @@ import {
   SkipBack,
   SkipForward,
   Shuffle,
+  TrendUp,
   X,
 } from "@phosphor-icons/react";
 
@@ -25,7 +26,10 @@ const API = "/api/v1/wyy_music";
 const SONG_API = "/api/v1/song";
 const RECENT_KEY = "imusic_recent_searches";
 const PLAY_MODE_KEY = "imusic_play_mode";
-const HOT_PLAYLIST_ID = 3778678;
+const PLAYLISTS = {
+  hotlist: { id: 3778678, name: "热歌榜" },
+  soaring: { id: 19723756, name: "飙升榜" },
+};
 const PAGE_SIZE = 15;
 const fallbackSongs = [
   { id: 1859245776, name: "夜曲", artists: "周杰伦", album: "十一月的萧邦", picUrl: "" },
@@ -85,10 +89,11 @@ export function App() {
   const [playlistName, setPlaylistName] = useState("热歌榜");
   const [playlistTracks, setPlaylistTracks] = useState([]);
   const [playlistPage, setPlaylistPage] = useState(1);
+  const [playlistStore, setPlaylistStore] = useState({});
 
   const resultLabel = useMemo(() => {
     if (searchedKeyword) return `“${searchedKeyword}”的搜索结果`;
-    return view === "hotlist" ? playlistName : "推荐歌曲";
+    return PLAYLISTS[view] ? playlistName : "推荐歌曲";
   }, [playlistName, searchedKeyword, view]);
 
   useEffect(() => {
@@ -169,15 +174,21 @@ export function App() {
     setSongs(tracks.slice(start, start + PAGE_SIZE));
   };
 
-  const loadHotPlaylist = async (targetPage = 1) => {
-    setView("hotlist");
+  const loadPlaylist = async (playlistView, targetPage = 1) => {
+    const playlistConfig = PLAYLISTS[playlistView];
+    if (!playlistConfig) return;
+
+    setView(playlistView);
     setSearchedKeyword("");
     setHasNextPage(false);
     setLoading(true);
     setError("");
 
-    if (playlistTracks.length) {
-      showPlaylistPage(playlistTracks, targetPage);
+    const storedPlaylist = playlistStore[playlistView];
+    if (storedPlaylist) {
+      setPlaylistName(storedPlaylist.name);
+      setPlaylistTracks(storedPlaylist.tracks);
+      showPlaylistPage(storedPlaylist.tracks, targetPage);
       setLoading(false);
       return;
     }
@@ -186,20 +197,22 @@ export function App() {
       const response = await fetch(`${API}/music_playlist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: HOT_PLAYLIST_ID }),
+        body: JSON.stringify({ id: playlistConfig.id }),
       });
       const payload = await response.json();
       const playlist = payload.data?.[0];
       if (!response.ok || payload.code !== 200 || !Array.isArray(playlist?.tracks)) {
-        throw new Error(payload.msg || "获取热歌榜失败");
+        throw new Error(payload.msg || `获取${playlistConfig.name}失败`);
       }
       const tracks = playlist.tracks.map(mapPlaylistTrack);
-      setPlaylistName(playlist.name || "热歌榜");
+      const name = playlist.name || playlistConfig.name;
+      setPlaylistName(name);
       setPlaylistTracks(tracks);
+      setPlaylistStore((previous) => ({ ...previous, [playlistView]: { name, tracks } }));
       showPlaylistPage(tracks, targetPage);
     } catch (reason) {
       setSongs([]);
-      setError(reason.message || "获取热歌榜失败");
+      setError(reason.message || `获取${playlistConfig.name}失败`);
     } finally {
       setLoading(false);
     }
@@ -455,7 +468,7 @@ export function App() {
   };
 
   const playQueueSong = (song) => {
-    if (view === "hotlist" && playlistTracks.length) {
+    if (PLAYLISTS[view] && playlistTracks.length) {
       const trackIndex = playlistTracks.findIndex((item) => item.id === song.id);
       const targetPage = trackIndex >= 0 ? Math.floor(trackIndex / PAGE_SIZE) + 1 : playlistPage;
       if (targetPage !== playlistPage) showPlaylistPage(playlistTracks, targetPage);
@@ -464,7 +477,7 @@ export function App() {
   };
 
   const stepSong = (delta) => {
-    const queue = view === "hotlist" && playlistTracks.length ? playlistTracks : songs;
+    const queue = PLAYLISTS[view] && playlistTracks.length ? playlistTracks : songs;
     if (!queue.length) return;
     const foundIndex = queue.findIndex((song) => song.id === current?.id);
 
@@ -496,12 +509,11 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="wordmark">iMusic</div>
-        <nav aria-label="音乐来源">
+        <nav aria-label="主导航">
           <button className={`nav-item ${view === "discover" ? "active" : ""}`} onClick={() => loadRecommendations("discover")}><Compass size={24} weight="regular" /><span>发现</span></button>
-          <button className={`nav-item ${view === "hotlist" ? "active" : ""}`} onClick={() => loadHotPlaylist(1)}><Fire size={24} weight={view === "hotlist" ? "fill" : "regular"} /><span>热歌榜</span></button>
+          <button className={`nav-item ${view === "hotlist" ? "active" : ""}`} onClick={() => loadPlaylist("hotlist", 1)}><Fire size={24} weight={view === "hotlist" ? "fill" : "regular"} /><span>热歌榜</span></button>
+          <button className={`nav-item ${view === "soaring" ? "active" : ""}`} onClick={() => loadPlaylist("soaring", 1)}><TrendUp size={24} weight={view === "soaring" ? "bold" : "regular"} /><span>飙升榜</span></button>
           <button className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => loadFavorites({ showList: true, targetPage: 1 })}><Heart size={24} weight={view === "favorites" ? "fill" : "regular"} /><span>我喜欢</span></button>
-          <button className={`nav-item source-link ${view === "netease" ? "active" : ""}`} onClick={() => loadRecommendations("netease")}><span className="source-icon"><MusicNoteSimple size={17} weight="fill" /></span><span>网易云音乐</span></button>
-          <button className="nav-item disabled" disabled><span className="source-icon ghost"><MusicNoteSimple size={17} weight="fill" /></span><span>QQ音乐 · 开发中</span></button>
         </nav>
         <button className="settings"><GearSix size={23} /><span>设置</span></button>
       </aside>
@@ -524,10 +536,10 @@ export function App() {
         </section>
 
         <section className="results" aria-live="polite" ref={resultsRef}>
-          <div className="results-title"><h2>{view === "favorites" ? "我喜欢的音乐" : resultLabel}</h2>{loading && <span>{searchedKeyword ? "正在搜索…" : view === "hotlist" ? "正在加载热歌榜…" : "正在加载推荐…"}</span>}</div>
+          <div className="results-title"><h2>{view === "favorites" ? "我喜欢的音乐" : resultLabel}</h2>{loading && <span>{searchedKeyword ? "正在搜索…" : PLAYLISTS[view] ? `正在加载${PLAYLISTS[view].name}…` : "正在加载推荐…"}</span>}</div>
           <div className="table-head"><span>歌曲</span><span>歌手</span><span>专辑</span><span /></div>
-          {error && <div className="message error"><span>{error}</span><button onClick={() => view === "hotlist" ? loadHotPlaylist(playlistPage) : view === "favorites" ? loadFavorites({ showList: true, targetPage: favoritePage }) : searchedKeyword ? loadPage(searchedKeyword || query, page) : loadRecommendations(view)}>重试</button></div>}
-          {!loading && !error && songs.length === 0 && <div className="message"><MusicNoteSimple size={30} /><strong>{view === "favorites" ? "还没有喜欢的歌曲" : searchedKeyword ? "没有找到相关歌曲" : view === "hotlist" ? "热歌榜暂时没有歌曲" : "还没有可推荐的缓存歌曲"}</strong><span>{searchedKeyword ? "试试歌手名或更短的关键词" : view === "hotlist" ? "稍后重试加载热歌榜" : "播放或收藏歌曲后，这里会出现推荐"}</span></div>}
+          {error && <div className="message error"><span>{error}</span><button onClick={() => PLAYLISTS[view] ? loadPlaylist(view, playlistPage) : view === "favorites" ? loadFavorites({ showList: true, targetPage: favoritePage }) : searchedKeyword ? loadPage(searchedKeyword || query, page) : loadRecommendations(view)}>重试</button></div>}
+          {!loading && !error && songs.length === 0 && <div className="message"><MusicNoteSimple size={30} /><strong>{view === "favorites" ? "还没有喜欢的歌曲" : searchedKeyword ? "没有找到相关歌曲" : PLAYLISTS[view] ? `${PLAYLISTS[view].name}暂时没有歌曲` : "还没有可推荐的缓存歌曲"}</strong><span>{searchedKeyword ? "试试歌手名或更短的关键词" : PLAYLISTS[view] ? `稍后重试加载${PLAYLISTS[view].name}` : "播放或收藏歌曲后，这里会出现推荐"}</span></div>}
           <div className={`song-list ${loading ? "loading-list" : ""}`}>
             {songs.map((song) => {
               const selected = current?.id === song.id;
@@ -561,8 +573,8 @@ export function App() {
               </button>
             </nav>
           )}
-          {view === "hotlist" && !error && songs.length > 0 && (
-            <nav className="pagination" aria-label="热歌榜分页">
+          {PLAYLISTS[view] && !error && songs.length > 0 && (
+            <nav className="pagination" aria-label={`${PLAYLISTS[view].name}分页`}>
               <button onClick={() => goToPlaylistPage(playlistPage - 1)} disabled={playlistPage === 1 || loading}>
                 <CaretLeft size={17} weight="bold" />
                 上一页
