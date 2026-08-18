@@ -9,6 +9,8 @@ from src.backend.schemas import (
     SongSchemas,
     WyyMusicAnalysisRequest,
     WyyMusicAnalysisResponse,
+    WyyMusicLyricRequest,
+    WyyMusicLyricResponse,
     WyyMusicPlaylistRequest,
     WyyMusicPlaylistResponse,
     WyyMusicSearchRequest,
@@ -169,33 +171,45 @@ class WyyMusicController:
             )
 
     @staticmethod
-    def music_lyric(request: WyyMusicAnalysisRequest) -> ResponseSchemas:
+    def music_lyric(request: WyyMusicLyricRequest) -> ResponseSchemas:
         """网易云音乐歌词解析
 
         Args:
-            request (WyyMusicAnalysisRequest): 请求参数
+            request (WyyMusicLyricRequest): 请求参数
 
         Returns:
             ResponseSchemas: 响应数据
         """
-        base_url = f"{_URL}/163_lyric?id={request.id}&"
-        if request.apikey:
-            base_url += f"apikey={request.apikey}&"
-        else:
-            base_url += f"apikey={_API}"
-        full_url = f"{base_url}"
+        cached = SongCacheController.get_song_lyrics(SongSchemas(platform="wyy", song_id=request.id))
+        if cached.code == 200:
+            return cached
 
-        response = requests.get(full_url)
-        payload = response.json()
-        if response.status_code == 200:
-            return ResponseSchemas(
-                code=200,
-                msg="success",
-                data=[payload["data"]],
+        if not _URL or not (request.apikey or _API):
+            return ResponseSchemas(code=500, msg="音乐接口配置不完整", data=None)
+
+        try:
+            response = requests.get(
+                f"{_URL}/163_lyric",
+                params={"id": request.id, "apikey": request.apikey or _API},
+                timeout=20,
             )
-        else:
+            payload = response.json()
+        except requests.RequestException:
+            return ResponseSchemas(code=502, msg="歌词服务暂时不可用", data=None)
+        except ValueError:
+            return ResponseSchemas(code=502, msg="歌词服务返回了无效数据", data=None)
+
+        if response.status_code != 200 or payload.get("code") != 200:
             return ResponseSchemas(
-                code=response.status_code,
-                msg=response.json().get("msg", "error"),
+                code=response.status_code if response.status_code != 200 else payload.get("code", 502),
+                msg=payload.get("msg", "获取歌词失败"),
                 data=None,
             )
+
+        try:
+            lyrics = WyyMusicLyricResponse.model_validate(payload["data"]).model_dump()
+        except (KeyError, TypeError, ValueError):
+            return ResponseSchemas(code=502, msg="歌词数据格式不正确", data=None)
+
+        SongCacheController.save_song_lyrics("wyy", request.id, lyrics)
+        return ResponseSchemas(code=200, msg="refreshed", data=[lyrics])

@@ -60,6 +60,31 @@ const formatTime = (seconds) => {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 };
 
+const getLyricText = (value) => {
+  if (typeof value === "string") return value;
+  return typeof value?.lyric === "string" ? value.lyric : "";
+};
+
+const parseLrc = (source) => {
+  const lines = [];
+  getLyricText(source).split(/\r?\n/).forEach((line) => {
+    const timestamps = [...line.matchAll(/\[(\d{1,3}):(\d{1,2}(?:\.\d{1,3})?)\]/g)];
+    if (!timestamps.length) return;
+    const text = line.replace(/\[[^\]]+\]/g, "").trim();
+    timestamps.forEach((match) => {
+      lines.push({ time: Number(match[1]) * 60 + Number(match[2]), text });
+    });
+  });
+  return lines.sort((a, b) => a.time - b.time);
+};
+
+const combineLyrics = (original, translated) => {
+  const translationMap = new Map(parseLrc(translated).map((line) => [line.time.toFixed(2), line.text]));
+  return parseLrc(original)
+    .filter((line) => line.text)
+    .map((line) => ({ ...line, translation: translationMap.get(line.time.toFixed(2)) || "" }));
+};
+
 const readRecent = () => {
   try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
   catch { return []; }
@@ -79,6 +104,8 @@ function Artwork({ song, size = 48 }) {
 export function App() {
   const audioRef = useRef(null);
   const resultsRef = useRef(null);
+  const lyricLineRefs = useRef([]);
+  const lyricCacheRef = useRef(new Map());
   const refreshingAudioRef = useRef(false);
   const playbackQueueRef = useRef([]);
   const playbackSourceRef = useRef(null);
@@ -113,6 +140,10 @@ export function App() {
   const [playlistIdInput, setPlaylistIdInput] = useState("");
   const [playlistMutationLoading, setPlaylistMutationLoading] = useState(false);
   const [deletingPlaylistId, setDeletingPlaylistId] = useState(null);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [lyricLines, setLyricLines] = useState([]);
+  const [lyricLoading, setLyricLoading] = useState(false);
+  const [lyricError, setLyricError] = useState("");
 
   const playlistConfigs = useMemo(() => ({
     ...PLAYLISTS,
@@ -132,6 +163,66 @@ export function App() {
     if (searchedKeyword) return `“${searchedKeyword}”的搜索结果`;
     return playlistConfigs[view] ? playlistName : "推荐歌曲";
   }, [playlistConfigs, playlistName, searchedKeyword, view]);
+
+  const activeLyricIndex = useMemo(() => {
+    let activeIndex = -1;
+    for (let index = 0; index < lyricLines.length; index += 1) {
+      if (lyricLines[index].time > time + 0.08) break;
+      activeIndex = index;
+    }
+    return activeIndex;
+  }, [lyricLines, time]);
+
+  useEffect(() => {
+    if (!lyricsOpen || !current?.id) return;
+    let cancelled = false;
+
+    const loadLyrics = async () => {
+      const cached = lyricCacheRef.current.get(current.id);
+      if (cached) {
+        setLyricLines(cached);
+        setLyricLoading(false);
+        setLyricError("");
+        return;
+      }
+
+      setLyricLoading(true);
+      setLyricLines([]);
+      setLyricError("");
+      try {
+        const response = await fetch(`${API}/music_lyric`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: current.id }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "歌词获取失败");
+        const lyric = payload.data?.[0] || {};
+        const lines = combineLyrics(lyric.lrc, lyric.tlyric);
+        lyricCacheRef.current.set(current.id, lines);
+        if (!cancelled) setLyricLines(lines);
+      } catch (reason) {
+        if (!cancelled) setLyricError(reason.message || "暂时无法获取歌词");
+      } finally {
+        if (!cancelled) setLyricLoading(false);
+      }
+    };
+
+    loadLyrics();
+    return () => { cancelled = true; };
+  }, [current?.id, lyricsOpen]);
+
+  useEffect(() => {
+    if (!lyricsOpen || activeLyricIndex < 0) return;
+    lyricLineRefs.current[activeLyricIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeLyricIndex, lyricsOpen]);
+
+  useEffect(() => {
+    if (!lyricsOpen) return undefined;
+    const closeOnEscape = (event) => { if (event.key === "Escape") setLyricsOpen(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [lyricsOpen]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -692,6 +783,48 @@ export function App() {
     playQueueSong(queue[nextIndex]);
   };
 
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return undefined;
+
+    const setHandler = (action, handler) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // 某些浏览器版本可能不支持全部媒体操作。
+      }
+    };
+
+    setHandler("play", () => audioRef.current?.play());
+    setHandler("pause", () => audioRef.current?.pause());
+    setHandler("previoustrack", () => stepSong(-1));
+    setHandler("nexttrack", () => stepSong(1));
+
+    return () => {
+      ["play", "pause", "previoustrack", "nexttrack"].forEach((action) => setHandler(action, null));
+    };
+  }, [current, playMode, playlistConfigs, playlistPage, playlistTracks, songs, view]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+
+    if (current && "MediaMetadata" in window) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: current.name || "未知歌曲",
+        artist: current.artists || "未知歌手",
+        album: current.album || "未知专辑",
+        artwork: current.picUrl ? [{ src: current.picUrl }] : [],
+      });
+    } else {
+      navigator.mediaSession.metadata = null;
+    }
+
+    try {
+      navigator.mediaSession.playbackState = current ? (playing ? "playing" : "paused") : "none";
+    } catch {
+      // Safari 等实现可能不允许直接设置播放状态。
+    }
+  }, [current, playing]);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -824,6 +957,44 @@ export function App() {
         </section>
       </main>
 
+      {lyricsOpen && (
+        <>
+          <button className="lyrics-backdrop" onClick={() => setLyricsOpen(false)} aria-label="关闭歌词" />
+          <aside className="lyrics-panel" aria-label="歌词面板">
+            <header className="lyrics-panel-header">
+              <div>
+                <span>正在播放</span>
+                <strong>{current?.name || "歌词"}</strong>
+                {current?.artists && <small>{current.artists}</small>}
+              </div>
+              <button onClick={() => setLyricsOpen(false)} aria-label="关闭歌词"><X size={21} /></button>
+            </header>
+            <div className="lyrics-scroll" aria-live="polite">
+              {!current && <div className="lyrics-status"><MusicNoteSimple size={32} weight="duotone" /><strong>还没有播放歌曲</strong><span>播放一首歌曲后即可查看歌词</span></div>}
+              {current && lyricLoading && <div className="lyrics-status"><SpinnerGap className="spin" size={28} /><span>正在加载歌词…</span></div>}
+              {current && !lyricLoading && lyricError && <div className="lyrics-status"><MusicNoteSimple size={30} /><strong>歌词加载失败</strong><span>{lyricError}</span></div>}
+              {current && !lyricLoading && !lyricError && lyricLines.length === 0 && <div className="lyrics-status"><MusicNoteSimple size={32} weight="duotone" /><strong>暂无歌词</strong><span>这首歌可能是纯音乐，或暂未收录歌词</span></div>}
+              {current && !lyricLoading && lyricLines.length > 0 && (
+                <div className="lyrics-lines">
+                  {lyricLines.map((line, index) => (
+                    <button
+                      key={`${line.time}-${index}`}
+                      ref={(node) => { lyricLineRefs.current[index] = node; }}
+                      className={`lyric-line ${index === activeLyricIndex ? "active" : ""}`}
+                      onClick={() => { if (audioRef.current) audioRef.current.currentTime = line.time; }}
+                      aria-current={index === activeLyricIndex ? "true" : undefined}
+                    >
+                      <span>{line.text}</span>
+                      {line.translation && line.translation !== line.text && <small>{line.translation}</small>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+        </>
+      )}
+
       <footer className={`player ${current ? "has-track" : ""}`}>
         <div className="track-meta">
           <Artwork song={current} size={62} />
@@ -840,7 +1011,7 @@ export function App() {
         </div>
         <div className="timeline"><span>{formatTime(time)}</span><input type="range" min="0" max={duration || 0} value={time} onChange={(e) => { audioRef.current.currentTime = Number(e.target.value); }} style={{ "--progress": `${duration ? (time / duration) * 100 : 0}%` }} /><span>{formatTime(duration)}</span></div>
         <div className="volume"><button onClick={() => setMuted(!muted)} aria-label={muted ? "取消静音" : "静音"}>{muted ? <SpeakerSlash size={22} /> : <SpeakerHigh size={22} />}</button><input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(Number(e.target.value))} style={{ "--progress": `${volume * 100}%` }} /></div>
-        <button className="lyrics" title="歌词功能即将开放"><Queue size={24} /><span>歌词</span></button>
+        <button className={`lyrics ${lyricsOpen ? "active" : ""}`} onClick={() => setLyricsOpen((open) => !open)} title="查看歌词" aria-label={lyricsOpen ? "关闭歌词" : "查看歌词"} aria-expanded={lyricsOpen}><Queue size={24} weight={lyricsOpen ? "fill" : "regular"} /><span>歌词</span></button>
       </footer>
 
       <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={handleAudioError} onEnded={() => stepSong(1)} onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} />

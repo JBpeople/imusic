@@ -2,9 +2,9 @@ import contextlib
 import datetime
 import os
 
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from dotenv import load_dotenv
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, create_engine, inspect, text
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 load_dotenv()
 
@@ -68,6 +68,7 @@ class SongCache(Base, BaseMixin):
     album_name = Column(String(255), nullable=True, comment="专辑名称")
     cover_url = Column(String(255), nullable=True, comment="封面图片URL")
     song_url = Column(String(255), nullable=False, comment="歌曲URL")
+    lyrics_data = Column(Text, nullable=True, comment="歌词JSON数据")
     last_played_at = Column(
         DateTime,
         nullable=False,
@@ -104,6 +105,17 @@ class PlaylistCache(Base, BaseMixin):
 
 
 Base.metadata.create_all(engine)
+
+
+def _ensure_song_cache_schema() -> None:
+    """为 create_all 无法更新的旧数据库补充歌词缓存字段。"""
+    if "lyrics_data" in {column["name"] for column in inspect(engine).get_columns("song_cache")}:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE song_cache ADD COLUMN lyrics_data TEXT"))
+
+
+_ensure_song_cache_schema()
 
 
 @contextlib.contextmanager

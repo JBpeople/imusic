@@ -127,7 +127,12 @@ class FavoriteSongController:
         """
         with get_session() as session:
             favorite_songs = (
-                session.query(FavoriteSong).filter(FavoriteSong.deleted_at.is_(None)).offset(offset).limit(limit).all()
+                session.query(FavoriteSong)
+                .filter(FavoriteSong.deleted_at.is_(None))
+                .order_by(FavoriteSong.updated_at.desc(), FavoriteSong.id.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
             )
             data = []
             for item in favorite_songs:
@@ -167,6 +172,38 @@ class FavoriteSongController:
 
 
 class SongCacheController:
+    @staticmethod
+    def get_song_lyrics(request: SongSchemas) -> ResponseSchemas:
+        """读取绑定在歌曲缓存记录上的长期歌词缓存。"""
+        with get_session() as session:
+            song_cache = (
+                session.query(SongCache)
+                .filter(SongCache.platform == request.platform, SongCache.song_id == request.song_id)
+                .first()
+            )
+            if not song_cache or song_cache.lyrics_data is None:
+                return ResponseSchemas(code=404, msg="lyrics cache not found", data=None)
+            try:
+                lyrics = json.loads(song_cache.lyrics_data)
+            except (TypeError, json.JSONDecodeError):
+                return ResponseSchemas(code=404, msg="lyrics cache invalid", data=None)
+            return ResponseSchemas(code=200, msg="cache_hit", data=[lyrics])
+
+    @staticmethod
+    def save_song_lyrics(platform: str, song_id: int, lyrics: dict) -> ResponseSchemas:
+        """将歌词永久写入已有的歌曲缓存记录。"""
+        with get_session() as session:
+            song_cache = (
+                session.query(SongCache)
+                .filter(SongCache.platform == platform, SongCache.song_id == song_id)
+                .first()
+            )
+            if not song_cache:
+                return ResponseSchemas(code=404, msg="song cache not found", data=None)
+            song_cache.lyrics_data = json.dumps(lyrics, ensure_ascii=False)
+            session.commit()
+            return ResponseSchemas(code=200, msg="success", data=None)
+
     @staticmethod
     def get_random_song_caches(limit: int = 15, platform: str = "wyy") -> ResponseSchemas:
         """从已有播放缓存中随机抽取推荐歌曲。"""
