@@ -1,0 +1,53 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "iMusic",
+  "version": "0.1.0",
+  "identifier": "org.ddacc.imusic",
+  "build": {
+    "frontendDist": "https://imusic.ddacc.dpdns.org/",
+    "devUrl": "https://imusic.ddacc.dpdns.org/"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "iMusic",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 360,
+        "minHeight": 640,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Music",
+    "shortDescription": "iMusic 在线音乐客户端",
+    "longDescription": "连接 iMusic 在线服务，搜索、收藏并播放音乐。",
+    "homepage": "https://imusic.ddacc.dpdns.org/",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug",
+      "minSdkVersion": 24
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

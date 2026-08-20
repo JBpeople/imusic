@@ -35,3 +35,18 @@ docker build -t imusic .
 docker volume create imusic-data
 docker run -d --name imusic -p 8001:8001 --env-file .env -e DATABASE_URL=sqlite:////app/data/data.db -v imusic-data:/app/data imusic
 ```
+
+## 客户端安装包
+
+客户端使用 Tauri，仅加载线上服务 `https://imusic.ddacc.dpdns.org/`，不包含 Python 后端或本地数据库。
+
+在 `src/frontend` 目录安装依赖后，可分别构建：
+
+```bash
+pnpm client:windows
+pnpm client:android:init
+pnpm client:android
+pnpm client:macos
+```
+
+Windows 安装包位于 `src-tauri/target/release/bundle/nsis`。Android APK 位于 `src-tauri/gen/android/app/build/outputs/apk`。DMG 必须在 macOS 上构建。

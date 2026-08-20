@@ -26,6 +26,10 @@ package-lock.json
 dist/
 src/frontend/dist/
 .vite/
+src/frontend/src-tauri/target/
+src/frontend/src-tauri/gen/schemas/
+src/frontend/src-tauri/gen/android/.gradle/
+src/frontend/src-tauri/gen/android/app/build/
 
 # Editors and operating systems
 .vscode/

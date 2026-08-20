@@ -1,13 +1,19 @@
 {
   "name": "frontend",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.19.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
-    "test:sites": "node --test tests/sites-worker.test.mjs"
+    "test:sites": "node --test tests/sites-worker.test.mjs",
+    "client:dev": "tauri dev",
+    "client:windows": "tauri build --bundles nsis",
+    "client:macos": "tauri build --bundles dmg",
+    "client:android:init": "tauri android init --ci",
+    "client:android": "tauri android build --debug --apk --ci"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
@@ -15,5 +21,8 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "vite": "6.4.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
   }
 }
