@@ -27,6 +27,12 @@ const API = "/api/v1/wyy_music";
 const SONG_API = "/api/v1/song";
 const RECENT_KEY = "imusic_recent_searches";
 const PLAY_MODE_KEY = "imusic_play_mode";
+const isIphoneSafari = () => {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPod/.test(navigator.userAgent)
+    && /WebKit/.test(navigator.userAgent)
+    && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent);
+};
 const PLAYLISTS = {
   hotlist: { id: 3778678, name: "热歌榜" },
   soaring: { id: 19723756, name: "飙升榜" },
@@ -109,6 +115,9 @@ export function App() {
   const refreshingAudioRef = useRef(false);
   const playbackQueueRef = useRef([]);
   const playbackSourceRef = useRef(null);
+  const preparedSongDetailsRef = useRef(new Map());
+  const preparingSongIdsRef = useRef(new Set());
+  const preparedNextSongRef = useRef(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState("discover");
   const [searchedKeyword, setSearchedKeyword] = useState("");
@@ -590,6 +599,30 @@ export function App() {
     return detail;
   };
 
+  const prepareFollowingSong = (song) => {
+    if (!isIphoneSafari()) return;
+    const queue = playbackQueueRef.current;
+    if (queue.length < 2) return;
+    const currentIndex = queue.findIndex((item) => item.id === song.id);
+    if (currentIndex < 0) return;
+
+    let nextSong;
+    if (playMode === "shuffle") {
+      const candidates = queue.filter((item) => item.id !== song.id);
+      nextSong = candidates[Math.floor(Math.random() * candidates.length)];
+    } else {
+      nextSong = queue[currentIndex + 1];
+    }
+    preparedNextSongRef.current = nextSong || null;
+    if (!nextSong || preparedSongDetailsRef.current.has(nextSong.id) || preparingSongIdsRef.current.has(nextSong.id)) return;
+
+    preparingSongIdsRef.current.add(nextSong.id);
+    requestFreshSong(nextSong)
+      .then((detail) => preparedSongDetailsRef.current.set(nextSong.id, detail))
+      .catch(() => {})
+      .finally(() => preparingSongIdsRef.current.delete(nextSong.id));
+  };
+
   const refreshAndPlay = async (song) => {
     if (!song || refreshingAudioRef.current) return;
     refreshingAudioRef.current = true;
@@ -605,6 +638,8 @@ export function App() {
       setCurrent(resolved);
       audioRef.current.src = detail.url;
       await audioRef.current.play();
+      preparedSongDetailsRef.current.set(song.id, detail);
+      prepareFollowingSong(resolved);
       setError("");
     } finally {
       refreshingAudioRef.current = false;
@@ -640,39 +675,59 @@ export function App() {
     setError("");
     try {
       let detail;
-      const cacheResponse = await fetch(`${SONG_API}/song_cache?platform=wyy&song_id=${song.id}`);
-      const cachePayload = await cacheResponse.json();
-      if (cacheResponse.ok && cachePayload.code === 200 && cachePayload.data?.[0]?.song_url) {
-        const cached = cachePayload.data[0];
+      const preparedDetail = preparedSongDetailsRef.current.get(song.id);
+      if (preparedDetail?.url) {
+        detail = preparedDetail;
+      } else if (song.url) {
         detail = {
-          id: cached.song_id,
-          url: cached.song_url,
-          name: cached.song_name,
-          artist: cached.singer_name,
-          album: cached.album_name,
-          picUrl: cached.cover_url,
-          cached: true,
+          id: song.id,
+          url: song.url,
+          name: song.name,
+          artist: song.artists,
+          album: song.album,
+          picUrl: song.picUrl,
+          cached: song.cached !== false,
         };
-        fetch(`${SONG_API}/song_cache`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ platform: "wyy", song_id: song.id }),
-        }).catch(() => {});
       } else {
-        const response = await fetch(`${API}/music_analysis`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: song.id, level: "exhigh", type: "json" }),
-        });
-        const payload = await response.json();
-        detail = payload?.data?.[0];
-        if (!response.ok || payload.code !== 200 || !detail?.url) throw new Error(payload.msg || "暂时无法播放这首歌");
+        const cacheResponse = await fetch(`${SONG_API}/song_cache?platform=wyy&song_id=${song.id}`);
+        const cachePayload = await cacheResponse.json();
+        if (cacheResponse.ok && cachePayload.code === 200 && cachePayload.data?.[0]?.song_url) {
+          const cached = cachePayload.data[0];
+          detail = {
+            id: cached.song_id,
+            url: cached.song_url,
+            name: cached.song_name,
+            artist: cached.singer_name,
+            album: cached.album_name,
+            picUrl: cached.cover_url,
+            cached: true,
+          };
+        } else {
+          const response = await fetch(`${API}/music_analysis`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: song.id, level: "exhigh", type: "json" }),
+          });
+          const payload = await response.json();
+          detail = payload?.data?.[0];
+          if (!response.ok || payload.code !== 200 || !detail?.url) throw new Error(payload.msg || "暂时无法播放这首歌");
+        }
       }
       const resolved = { ...song, ...detail, artists: detail.artist || song.artists };
       setCurrent(resolved);
       audio.src = detail.url;
       try {
-        await audio.play();
+        const playback = audio.play();
+        if (detail.cached) {
+          fetch(`${SONG_API}/song_cache`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ platform: "wyy", song_id: song.id }),
+          }).catch(() => {});
+        }
+        await playback;
+        preparedSongDetailsRef.current.set(song.id, detail);
+        prepareFollowingSong(resolved);
       } catch (playError) {
         if (!detail.cached) throw playError;
         await refreshAndPlay(resolved);
@@ -760,6 +815,12 @@ export function App() {
     const foundIndex = queue.findIndex((song) => song.id === current?.id);
 
     if (playMode === "shuffle") {
+      if (delta > 0 && preparedNextSongRef.current) {
+        const preparedNextSong = preparedNextSongRef.current;
+        preparedNextSongRef.current = null;
+        playQueueSong(preparedNextSong);
+        return;
+      }
       if (queue.length === 1) {
         playQueueSong(queue[0]);
         return;
@@ -1014,7 +1075,7 @@ export function App() {
         <button className={`lyrics ${lyricsOpen ? "active" : ""}`} onClick={() => setLyricsOpen((open) => !open)} title="查看歌词" aria-label={lyricsOpen ? "关闭歌词" : "查看歌词"} aria-expanded={lyricsOpen}><Queue size={24} weight={lyricsOpen ? "fill" : "regular"} /><span>歌词</span></button>
       </footer>
 
-      <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={handleAudioError} onEnded={() => stepSong(1)} onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} />
+      <audio ref={audioRef} preload="auto" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={handleAudioError} onEnded={() => stepSong(1)} onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} />
     </div>
   );
 }
