@@ -1,28 +1,30 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from src.backend.controller import FavoritePlaylistController, FavoriteSongController, SongCacheController
 from src.backend.schemas import PlaylistSchemas, ResponseSchemas, SongCacheSchemas, SongSchemas
+from src.backend.model import User
+from src.backend.view.auth import require_user
 
 song_router = APIRouter(prefix="/api/v1/song", tags=["音乐管理"])
 
 
 @song_router.post("/favorite_playlist", summary="添加收藏歌单")
-def add_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
-    return FavoritePlaylistController.add_favorite_playlist(request)
+def add_favorite_playlist(request: PlaylistSchemas, user: User = Depends(require_user)) -> ResponseSchemas:
+    return FavoritePlaylistController.add_favorite_playlist(request, user.id)
 
 
 @song_router.get("/favorite_playlists", summary="获取收藏歌单列表")
-def get_favorite_playlists(platform: str = "wyy") -> ResponseSchemas:
-    return FavoritePlaylistController.get_favorite_playlists(platform=platform)
+def get_favorite_playlists(platform: str = "wyy", user: User = Depends(require_user)) -> ResponseSchemas:
+    return FavoritePlaylistController.get_favorite_playlists(user.id, platform=platform)
 
 
 @song_router.delete("/favorite_playlist", summary="删除收藏歌单")
-def remove_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
-    return FavoritePlaylistController.remove_favorite_playlist(request)
+def remove_favorite_playlist(request: PlaylistSchemas, user: User = Depends(require_user)) -> ResponseSchemas:
+    return FavoritePlaylistController.remove_favorite_playlist(request, user.id)
 
 
 @song_router.post("/favorite_song", summary="添加喜欢歌曲")
-def add_favorite_song(request: SongSchemas) -> ResponseSchemas:
+def add_favorite_song(request: SongSchemas, user: User = Depends(require_user)) -> ResponseSchemas:
     """添加喜欢歌曲
 
     Args:
@@ -31,21 +33,21 @@ def add_favorite_song(request: SongSchemas) -> ResponseSchemas:
     Returns:
         ResponseSchemas: 响应结果
     """
-    return FavoriteSongController.add_favorite_song(request)
+    return FavoriteSongController.add_favorite_song(request, user.id)
 
 
 @song_router.get("/favorite_songs", summary="获取喜欢歌曲列表")
-def get_favorite_songs(limit: int = 15, offset: int = 0) -> ResponseSchemas:
+def get_favorite_songs(limit: int = 15, offset: int = 0, user: User = Depends(require_user)) -> ResponseSchemas:
     """获取喜欢歌曲列表
 
     Returns:
         ResponseSchemas: 响应结果
     """
-    return FavoriteSongController.get_favorite_songs(limit=limit, offset=offset)
+    return FavoriteSongController.get_favorite_songs(user.id, limit=limit, offset=offset)
 
 
 @song_router.delete("/favorite_song", summary="移除喜欢歌曲")
-def remove_favorite_song(request: SongSchemas) -> ResponseSchemas:
+def remove_favorite_song(request: SongSchemas, user: User = Depends(require_user)) -> ResponseSchemas:
     """移除喜欢歌曲
 
     Args:
@@ -54,7 +56,7 @@ def remove_favorite_song(request: SongSchemas) -> ResponseSchemas:
     Returns:
         ResponseSchemas: 响应结果
     """
-    return FavoriteSongController.remove_favorite_song(request)
+    return FavoriteSongController.remove_favorite_song(request, user.id)
 
 
 @song_router.post("/song_cache", summary="添加歌曲缓存")

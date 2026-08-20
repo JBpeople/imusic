@@ -9,7 +9,7 @@ from src.backend.schemas import PlaylistSchemas, ResponseSchemas, SongCacheSchem
 
 class FavoritePlaylistController:
     @staticmethod
-    def add_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
+    def add_favorite_playlist(request: PlaylistSchemas, user_id: int) -> ResponseSchemas:
         """收藏歌单；已删除的记录会被恢复。"""
         with get_session() as session:
             favorite = (
@@ -17,6 +17,7 @@ class FavoritePlaylistController:
                 .filter(
                     FavoritePlaylist.platform == request.platform,
                     FavoritePlaylist.playlist_id == request.playlist_id,
+                    FavoritePlaylist.user_id == user_id,
                 )
                 .first()
             )
@@ -25,7 +26,7 @@ class FavoritePlaylistController:
                 favorite.updated_at = datetime.datetime.now(datetime.timezone.utc)
                 message = "restored"
             else:
-                favorite = FavoritePlaylist(platform=request.platform, playlist_id=request.playlist_id)
+                favorite = FavoritePlaylist(user_id=user_id, platform=request.platform, playlist_id=request.playlist_id)
                 session.add(favorite)
                 message = "created"
             session.commit()
@@ -36,12 +37,16 @@ class FavoritePlaylistController:
             )
 
     @staticmethod
-    def get_favorite_playlists(platform: str = "wyy") -> ResponseSchemas:
+    def get_favorite_playlists(user_id: int, platform: str = "wyy") -> ResponseSchemas:
         """获取收藏歌单，并附带已有缓存中的卡片信息。"""
         with get_session() as session:
             favorites = (
                 session.query(FavoritePlaylist)
-                .filter(FavoritePlaylist.platform == platform, FavoritePlaylist.deleted_at.is_(None))
+                .filter(
+                    FavoritePlaylist.user_id == user_id,
+                    FavoritePlaylist.platform == platform,
+                    FavoritePlaylist.deleted_at.is_(None),
+                )
                 .order_by(FavoritePlaylist.updated_at.desc())
                 .all()
             )
@@ -73,7 +78,7 @@ class FavoritePlaylistController:
             return ResponseSchemas(code=200, msg="success", data=data)
 
     @staticmethod
-    def remove_favorite_playlist(request: PlaylistSchemas) -> ResponseSchemas:
+    def remove_favorite_playlist(request: PlaylistSchemas, user_id: int) -> ResponseSchemas:
         """从我的歌单中移除歌单，保留歌单详情缓存。"""
         with get_session() as session:
             favorite = (
@@ -81,6 +86,7 @@ class FavoritePlaylistController:
                 .filter(
                     FavoritePlaylist.platform == request.platform,
                     FavoritePlaylist.playlist_id == request.playlist_id,
+                    FavoritePlaylist.user_id == user_id,
                     FavoritePlaylist.deleted_at.is_(None),
                 )
                 .first()
@@ -94,7 +100,7 @@ class FavoritePlaylistController:
 
 class FavoriteSongController:
     @staticmethod
-    def add_favorite_song(request: SongSchemas) -> ResponseSchemas:
+    def add_favorite_song(request: SongSchemas, user_id: int) -> ResponseSchemas:
         """添加喜欢歌曲
 
         Args:
@@ -106,12 +112,16 @@ class FavoriteSongController:
         with get_session() as session:
             favorite_song = (
                 session.query(FavoriteSong)
-                .filter(FavoriteSong.platform == request.platform, FavoriteSong.song_id == request.song_id)
+                .filter(
+                    FavoriteSong.user_id == user_id,
+                    FavoriteSong.platform == request.platform,
+                    FavoriteSong.song_id == request.song_id,
+                )
                 .first()
             )
 
             if not favorite_song:
-                session.add(FavoriteSong(platform=request.platform, song_id=request.song_id))
+                session.add(FavoriteSong(user_id=user_id, platform=request.platform, song_id=request.song_id))
                 session.commit()
             else:
                 favorite_song.deleted_at = None
@@ -119,7 +129,7 @@ class FavoriteSongController:
                 session.commit()
             return ResponseSchemas(code=200, msg="success", data=None)
     @staticmethod
-    def get_favorite_songs(limit: int = 15, offset: int = 0) -> ResponseSchemas:
+    def get_favorite_songs(user_id: int, limit: int = 15, offset: int = 0) -> ResponseSchemas:
         """获取喜欢的歌
 
         Returns:
@@ -128,7 +138,7 @@ class FavoriteSongController:
         with get_session() as session:
             favorite_songs = (
                 session.query(FavoriteSong)
-                .filter(FavoriteSong.deleted_at.is_(None))
+                .filter(FavoriteSong.user_id == user_id, FavoriteSong.deleted_at.is_(None))
                 .order_by(FavoriteSong.updated_at.desc(), FavoriteSong.id.desc())
                 .offset(offset)
                 .limit(limit)
@@ -148,7 +158,7 @@ class FavoriteSongController:
             return ResponseSchemas(code=200, msg="success", data=data)
 
     @staticmethod
-    def remove_favorite_song(request: SongSchemas) -> ResponseSchemas:
+    def remove_favorite_song(request: SongSchemas, user_id: int) -> ResponseSchemas:
         """移除喜欢歌曲
 
         Args:
@@ -160,7 +170,11 @@ class FavoriteSongController:
         with get_session() as session:
             favorite_song = (
                 session.query(FavoriteSong)
-                .filter(FavoriteSong.platform == request.platform, FavoriteSong.song_id == request.song_id)
+                .filter(
+                    FavoriteSong.user_id == user_id,
+                    FavoriteSong.platform == request.platform,
+                    FavoriteSong.song_id == request.song_id,
+                )
                 .first()
             )
             if favorite_song:

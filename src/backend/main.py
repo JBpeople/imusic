@@ -1,15 +1,16 @@
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.backend.view import song_router, wyy_music_router
+from src.backend.view import auth_router, require_user, song_router, wyy_music_router
 
 app = FastAPI(title="IMusic", version="1.0.0")
-app.include_router(song_router)
-app.include_router(wyy_music_router)
+app.include_router(auth_router)
+app.include_router(song_router, dependencies=[Depends(require_user)])
+app.include_router(wyy_music_router, dependencies=[Depends(require_user)])
 
 frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist" / "client"
 if frontend_dist.exists():

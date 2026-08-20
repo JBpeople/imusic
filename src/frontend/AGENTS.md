@@ -12,5 +12,6 @@ When implementing from a selected generated mock, treat that image as the source
 - Playback: keep browser/Windows system media controls in sync through the Media Session API, including metadata, play/pause, previous track, and next track actions.
 - Playback: on iPhone Safari, prepare only the next queued song URL while the current song is playing, then switch the existing audio element and invoke play synchronously from the ended event before any awaited network work.
 - Lyrics: keep a player-level lyrics entry. Show synchronized, auto-scrolling lyrics in a right-side panel on desktop and a full-screen panel on mobile; pair translated lines when the API provides them and allow seeking by clicking a line.
+- Accounts: require a local account before entering iMusic. The first account is the administrator; admins can create, disable, and reset other users. Keep favorites and saved playlists private per user while sharing playback, playlist, and lyric caches globally.
 
 Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts/prepare-sites-build.mjs`, and `tests/sites-worker.test.mjs` intact so the same local prototype can be handed to Sites. Before a Sites handoff, run `npm run build` and `npm run test:sites`; the build must leave `dist/client/index.html`, `dist/server/index.js`, and `dist/.openai/hosting.json`.

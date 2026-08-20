@@ -3,8 +3,8 @@ import {
   CaretLeft,
   CaretRight,
   Compass,
-  GearSix,
   Heart,
+  Key,
   ListNumbers,
   MagnifyingGlass,
   MusicNoteSimple,
@@ -18,13 +18,17 @@ import {
   SkipBack,
   SkipForward,
   Shuffle,
+  ShieldCheck,
+  SignOut,
   Trophy,
   Trash,
+  UserCircle,
   X,
 } from "@phosphor-icons/react";
 
 const API = "/api/v1/wyy_music";
 const SONG_API = "/api/v1/song";
+const AUTH_API = "/api/v1/auth";
 const RECENT_KEY = "imusic_recent_searches";
 const PLAY_MODE_KEY = "imusic_play_mode";
 const isIphoneSafari = () => {
@@ -107,6 +111,52 @@ function Artwork({ song, size = 48 }) {
   );
 }
 
+function AuthScreen({ setupRequired, onAuthenticated }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setAuthError("");
+    try {
+      const response = await fetch(`${AUTH_API}/${setupRequired ? "setup" : "login"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "登录失败");
+      onAuthenticated(payload.data?.[0]);
+    } catch (reason) {
+      setAuthError(reason.message || "暂时无法登录");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-brand"><MusicNoteSimple size={26} weight="fill" /><span>iMusic</span></div>
+        <div className="auth-copy">
+          <span>{setupRequired ? "首次使用" : "欢迎回来"}</span>
+          <h1>{setupRequired ? "创建管理员账号" : "登录 iMusic"}</h1>
+          <p>{setupRequired ? "当前账号将负责管理其他用户，现有收藏会自动归到该账号。" : "登录后继续访问你的音乐、收藏歌单和喜欢列表。"}</p>
+        </div>
+        <form className="auth-form" onSubmit={submit}>
+          <label>账号<input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="3–64 位字母、数字或 _.-" minLength={3} required /></label>
+          <label>密码<input type="password" autoComplete={setupRequired ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 8 位" minLength={8} required /></label>
+          {authError && <div className="auth-error">{authError}</div>}
+          <button type="submit" disabled={busy || username.trim().length < 3 || password.length < 8}>{busy && <SpinnerGap className="spin" size={18} />}{setupRequired ? "创建并进入" : "登录"}</button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
 export function App() {
   const audioRef = useRef(null);
   const resultsRef = useRef(null);
@@ -153,6 +203,127 @@ export function App() {
   const [lyricLines, setLyricLines] = useState([]);
   const [lyricLoading, setLyricLoading] = useState(false);
   const [lyricError, setLyricError] = useState("");
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authUser, setAuthUser] = useState(null);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [managedUsers, setManagedUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [accountError, setAccountError] = useState("");
+  const [newUser, setNewUser] = useState({ username: "", password: "", is_admin: false });
+  const [resetPasswords, setResetPasswords] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const response = await fetch(`${AUTH_API}/me`);
+        const payload = await response.json();
+        if (response.ok && payload.code === 200 && payload.data?.[0]) {
+          if (!cancelled) setAuthUser(payload.data[0]);
+          return;
+        }
+        const statusResponse = await fetch(`${AUTH_API}/setup_status`);
+        const statusPayload = await statusResponse.json();
+        if (!cancelled) setSetupRequired(Boolean(statusPayload.data?.[0]?.setup_required));
+      } catch {
+        if (!cancelled) setSetupRequired(false);
+      } finally {
+        if (!cancelled) setAuthLoading(false);
+      }
+    };
+    restoreSession();
+    return () => { cancelled = true; };
+  }, []);
+
+  const loadManagedUsers = async () => {
+    if (!authUser?.is_admin) return;
+    setUsersLoading(true);
+    setAccountError("");
+    try {
+      const response = await fetch(`${AUTH_API}/users`);
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "获取用户失败");
+      setManagedUsers(payload.data || []);
+    } catch (reason) {
+      setAccountError(reason.message || "获取用户失败");
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const openAccountPanel = () => {
+    setAccountOpen(true);
+    loadManagedUsers();
+  };
+
+  const createManagedUser = async (event) => {
+    event.preventDefault();
+    setUsersLoading(true);
+    setAccountError("");
+    try {
+      const response = await fetch(`${AUTH_API}/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "创建用户失败");
+      setNewUser({ username: "", password: "", is_admin: false });
+      await loadManagedUsers();
+    } catch (reason) {
+      setAccountError(reason.message || "创建用户失败");
+      setUsersLoading(false);
+    }
+  };
+
+  const toggleManagedUser = async (user) => {
+    setAccountError("");
+    try {
+      const response = await fetch(`${AUTH_API}/users/${user.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: !user.is_active }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "更新用户失败");
+      setManagedUsers((previous) => previous.map((item) => item.id === user.id ? payload.data[0] : item));
+    } catch (reason) {
+      setAccountError(reason.message || "更新用户失败");
+    }
+  };
+
+  const resetManagedPassword = async (event, user) => {
+    event.preventDefault();
+    const password = resetPasswords[user.id] || "";
+    if (password.length < 8) return;
+    setAccountError("");
+    try {
+      const response = await fetch(`${AUTH_API}/users/${user.id}/password`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 200) throw new Error(payload.msg || "重置密码失败");
+      setResetPasswords((previous) => ({ ...previous, [user.id]: "" }));
+      if (user.id === authUser.id) await logout();
+    } catch (reason) {
+      setAccountError(reason.message || "重置密码失败");
+    }
+  };
+
+  const logout = async () => {
+    await fetch(`${AUTH_API}/logout`, { method: "POST" }).catch(() => {});
+    audioRef.current?.pause();
+    setCurrent(null);
+    setPlaying(false);
+    setAccountOpen(false);
+    setAuthUser(null);
+    setSetupRequired(false);
+    setFavorites(new Set());
+    setSavedPlaylists([]);
+  };
 
   const playlistConfigs = useMemo(() => ({
     ...PLAYLISTS,
@@ -524,10 +695,13 @@ export function App() {
   };
 
   useEffect(() => {
+    if (!authUser) return;
+    setFavorites(new Set());
+    setSavedPlaylists([]);
     loadFavorites();
     loadSavedPlaylists().catch(() => {});
     loadRecommendations("discover");
-  }, []);
+  }, [authUser?.id]);
 
   const saveRecent = (keyword) => {
     const next = [keyword, ...recent.filter((item) => item !== keyword)].slice(0, 7);
@@ -886,6 +1060,14 @@ export function App() {
     }
   }, [current, playing]);
 
+  if (authLoading) {
+    return <main className="auth-page"><div className="auth-loading"><SpinnerGap className="spin" size={28} /><span>正在打开 iMusic…</span></div></main>;
+  }
+
+  if (!authUser) {
+    return <AuthScreen setupRequired={setupRequired} onAuthenticated={(user) => { setAuthUser(user); setSetupRequired(false); }} />;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -896,7 +1078,7 @@ export function App() {
           <button className={`nav-item ${view === "playlists" || (playlistConfigs[view] && playlistOrigin === "playlists") ? "active" : ""}`} onClick={() => loadPlaylistCollection("playlists")} aria-label="我的歌单"><Queue size={24} weight={view === "playlists" || (playlistConfigs[view] && playlistOrigin === "playlists") ? "fill" : "regular"} /><span>我的歌单</span></button>
           <button className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => loadFavorites({ showList: true, targetPage: 1 })} aria-label="我喜欢"><Heart size={24} weight={view === "favorites" ? "fill" : "regular"} /><span>我喜欢</span></button>
         </nav>
-        <button className="settings"><GearSix size={23} /><span>设置</span></button>
+        <button className="settings" onClick={openAccountPanel}><UserCircle size={23} /><span>{authUser.username}</span></button>
       </aside>
 
       <main className="content">
@@ -1017,6 +1199,43 @@ export function App() {
           )}
         </section>
       </main>
+
+      {accountOpen && (
+        <>
+          <button className="account-backdrop" onClick={() => setAccountOpen(false)} aria-label="关闭账号管理" />
+          <aside className="account-panel" aria-label="账号管理">
+            <header className="account-header">
+              <div><span>当前账号</span><strong>{authUser.username}</strong><small>{authUser.is_admin ? "管理员" : "普通用户"}</small></div>
+              <button onClick={() => setAccountOpen(false)} aria-label="关闭账号管理"><X size={21} /></button>
+            </header>
+            <div className="account-content">
+              {authUser.is_admin && (
+                <>
+                  <section className="account-section">
+                    <div className="account-section-title"><div><ShieldCheck size={20} /><strong>用户管理</strong></div>{usersLoading && <SpinnerGap className="spin" size={17} />}</div>
+                    <form className="user-create-form" onSubmit={createManagedUser}>
+                      <input value={newUser.username} onChange={(event) => setNewUser((previous) => ({ ...previous, username: event.target.value }))} placeholder="新用户账号" minLength={3} required />
+                      <input type="password" value={newUser.password} onChange={(event) => setNewUser((previous) => ({ ...previous, password: event.target.value }))} placeholder="初始密码（至少 8 位）" minLength={8} required />
+                      <label><input type="checkbox" checked={newUser.is_admin} onChange={(event) => setNewUser((previous) => ({ ...previous, is_admin: event.target.checked }))} />管理员</label>
+                      <button type="submit" disabled={usersLoading}><Plus size={17} weight="bold" />新增用户</button>
+                    </form>
+                  </section>
+                  <section className="user-list">
+                    {managedUsers.map((user) => (
+                      <article className="user-card" key={user.id}>
+                        <div className="user-card-top"><div className="user-avatar">{user.username.slice(0, 1).toUpperCase()}</div><div><strong>{user.username}</strong><span>{user.is_admin ? "管理员" : "普通用户"} · {user.is_active ? "正常" : "已停用"}</span></div><button onClick={() => toggleManagedUser(user)} disabled={user.id === authUser.id}>{user.is_active ? "停用" : "启用"}</button></div>
+                        <form className="password-reset" onSubmit={(event) => resetManagedPassword(event, user)}><Key size={16} /><input type="password" value={resetPasswords[user.id] || ""} onChange={(event) => setResetPasswords((previous) => ({ ...previous, [user.id]: event.target.value }))} placeholder="输入新密码" minLength={8} /><button type="submit" disabled={(resetPasswords[user.id] || "").length < 8}>重置密码</button></form>
+                      </article>
+                    ))}
+                  </section>
+                </>
+              )}
+              {accountError && <div className="auth-error">{accountError}</div>}
+              <button className="logout-button" onClick={logout}><SignOut size={19} />退出登录</button>
+            </div>
+          </aside>
+        </>
+      )}
 
       {lyricsOpen && (
         <>

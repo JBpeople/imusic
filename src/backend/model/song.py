@@ -3,7 +3,7 @@ import datetime
 import os
 
 from dotenv import load_dotenv
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, create_engine, inspect, text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 load_dotenv()
@@ -45,6 +45,7 @@ class FavoriteSong(Base, BaseMixin):
     """收藏歌曲数据模型"""
 
     __tablename__ = "favorite_songs"
+    user_id = Column(Integer, nullable=True, index=True, comment="所属用户ID")
     platform = Column(String(4), nullable=False, comment="歌曲平台")
     song_id = Column(Integer, nullable=False, comment="歌曲ID")
 
@@ -53,6 +54,7 @@ class FavoritePlaylist(Base, BaseMixin):
     """收藏歌单数据模型。"""
 
     __tablename__ = "favorite_playlists"
+    user_id = Column(Integer, nullable=True, index=True, comment="所属用户ID")
     platform = Column(String(8), nullable=False, comment="歌单平台")
     playlist_id = Column(BigInteger, nullable=False, comment="歌单ID")
 
@@ -104,18 +106,55 @@ class PlaylistCache(Base, BaseMixin):
     )
 
 
+class User(Base, BaseMixin):
+    """iMusic 本地用户。"""
+
+    __tablename__ = "users"
+    username = Column(String(64), nullable=False, unique=True, index=True, comment="登录账号")
+    password_hash = Column(String(255), nullable=False, comment="密码哈希")
+    is_admin = Column(Boolean, nullable=False, default=False, comment="是否管理员")
+    is_active = Column(Boolean, nullable=False, default=True, comment="是否允许登录")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "is_admin": self.is_admin,
+            "is_active": self.is_active,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class UserSession(Base, BaseMixin):
+    """持久登录会话，仅保存令牌摘要。"""
+
+    __tablename__ = "user_sessions"
+    user_id = Column(Integer, nullable=False, index=True, comment="用户ID")
+    token_hash = Column(String(64), nullable=False, unique=True, index=True, comment="会话令牌SHA256")
+    expires_at = Column(DateTime, nullable=False, index=True, comment="会话过期时间")
+
+
 Base.metadata.create_all(engine)
 
 
-def _ensure_song_cache_schema() -> None:
-    """为 create_all 无法更新的旧数据库补充歌词缓存字段。"""
-    if "lyrics_data" in {column["name"] for column in inspect(engine).get_columns("song_cache")}:
-        return
+def _ensure_legacy_schema() -> None:
+    """为 create_all 无法更新的旧数据库补充新增字段。"""
+    schema_updates = {
+        "song_cache": {"lyrics_data": "TEXT"},
+        "favorite_songs": {"user_id": "INTEGER"},
+        "favorite_playlists": {"user_id": "INTEGER"},
+    }
+    inspector = inspect(engine)
     with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE song_cache ADD COLUMN lyrics_data TEXT"))
+        for table_name, expected_columns in schema_updates.items():
+            existing = {column["name"] for column in inspector.get_columns(table_name)}
+            for column_name, column_type in expected_columns.items():
+                if column_name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
 
 
-_ensure_song_cache_schema()
+_ensure_legacy_schema()
 
 
 @contextlib.contextmanager
