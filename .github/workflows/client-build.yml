@@ -54,7 +54,7 @@ jobs:
           if-no-files-found: error
 
   android:
-    name: Android APK
+    name: Android ARM64 Release APK
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -76,7 +76,7 @@ jobs:
       - uses: android-actions/setup-android@v3
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src/frontend/src-tauri
@@ -87,9 +87,48 @@ jobs:
           echo "NDK_HOME=$ndk_home" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - run: pnpm client:android:init
-      - run: pnpm client:android
+      - name: Configure Android release signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${ANDROID_KEYSTORE_BASE64:?Missing ANDROID_KEYSTORE_BASE64 secret}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Missing ANDROID_KEYSTORE_PASSWORD secret}"
+          : "${ANDROID_KEY_ALIAS:?Missing ANDROID_KEY_ALIAS secret}"
+          : "${ANDROID_KEY_PASSWORD:?Missing ANDROID_KEY_PASSWORD secret}"
+
+          keystore_path="$RUNNER_TEMP/imusic-release.p12"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          chmod 600 "$keystore_path"
+          {
+            printf 'storeFile=%s\n' "$keystore_path"
+            printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+          } > src-tauri/gen/android/keystore.properties
+          node scripts/configure-android-signing.mjs
+      - name: Build signed Android release
+        run: pnpm client:android
+      - name: Verify Android release
+        shell: bash
+        run: |
+          mapfile -t apk_files < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk')
+          if [ "${#apk_files[@]}" -ne 1 ]; then
+            printf 'Expected one APK, found %s\n' "${#apk_files[@]}"
+            exit 1
+          fi
+          if [[ "${apk_files[0]}" == *debug* || "${apk_files[0]}" == *unsigned* ]]; then
+            printf 'Unexpected non-release APK: %s\n' "${apk_files[0]}"
+            exit 1
+          fi
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$build_tools/apksigner" verify --verbose --print-certs "${apk_files[0]}"
+          ls -lh "${apk_files[0]}"
       - uses: actions/upload-artifact@v6
         with:
-          name: Android APK
+          name: Android ARM64 Release APK
           path: src/frontend/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error

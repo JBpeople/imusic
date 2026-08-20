@@ -51,4 +51,6 @@ pnpm client:macos
 
 Windows 安装包位于 `src-tauri/target/release/bundle/nsis`。Android APK 位于 `src-tauri/gen/android/app/build/outputs/apk`。DMG 必须在 macOS 上构建。
 
+GitHub Actions 生成的 Android 正式版仅包含 ARM64，使用固定发布密钥签名，并启用 Rust Release 体积优化。相较于此前同时包含四种 CPU 架构的 Debug 通用包，正式 APK 会显著缩小。正式签名文件只保存在 GitHub Actions Secrets 和本机 `.signing` 目录，不会提交到 Git；必须妥善备份，否则后续版本无法覆盖安装。
+
 Windows 和 macOS 客户端点击关闭按钮时会隐藏到系统托盘。单击托盘图标可恢复窗口，右键菜单可以打开或彻底退出 iMusic。

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.signing/
 
 # Local databases and application data
 *.db

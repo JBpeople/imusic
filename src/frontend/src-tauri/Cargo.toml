@@ -1,6 +1,6 @@
 [package]
 name = "imusic"
-version = "0.1.1"
+version = "0.2.0"
 description = "iMusic online music client"
 authors = ["JBpeople"]
 edition = "2021"
@@ -17,3 +17,10 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 tauri = { version = "2.11.3", features = ["tray-icon"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
