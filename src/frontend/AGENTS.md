@@ -14,5 +14,6 @@ When implementing from a selected generated mock, treat that image as the source
 - Lyrics: keep a player-level lyrics entry. Show synchronized, auto-scrolling lyrics in a right-side panel on desktop and a full-screen panel on mobile; pair translated lines when the API provides them and allow seeking by clicking a line.
 - Accounts: require a local account before entering iMusic. The first account is the administrator; admins can create, disable, and reset other users. Keep favorites and saved playlists private per user while sharing playback, playlist, and lyric caches globally.
 - Distribution: package native apps as client-only Tauri wrappers that load `https://imusic.ddacc.dpdns.org/`; do not bundle the Python backend, database, or a local port 8001 service.
+- Desktop lifecycle: closing the native Windows or macOS window hides iMusic to the system tray. A left click restores the main window; the tray menu provides explicit open and quit actions.
 
 Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts/prepare-sites-build.mjs`, and `tests/sites-worker.test.mjs` intact so the same local prototype can be handed to Sites. Before a Sites handoff, run `npm run build` and `npm run test:sites`; the build must leave `dist/client/index.html`, `dist/server/index.js`, and `dist/.openai/hosting.json`.

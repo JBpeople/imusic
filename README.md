@@ -50,3 +50,5 @@ pnpm client:macos
 ```
 
 Windows 安装包位于 `src-tauri/target/release/bundle/nsis`。Android APK 位于 `src-tauri/gen/android/app/build/outputs/apk`。DMG 必须在 macOS 上构建。
+
+Windows 和 macOS 客户端点击关闭按钮时会隐藏到系统托盘。单击托盘图标可恢复窗口，右键菜单可以打开或彻底退出 iMusic。

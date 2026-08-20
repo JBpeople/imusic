@@ -1,6 +1,6 @@
 [package]
 name = "imusic"
-version = "0.1.0"
+version = "0.1.1"
 description = "iMusic online music client"
 authors = ["JBpeople"]
 edition = "2021"
@@ -16,4 +16,4 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-tauri = { version = "2.11.3", features = [] }
+tauri = { version = "2.11.3", features = ["tray-icon"] }
